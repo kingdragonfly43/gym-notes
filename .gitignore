@@ -1,0 +1,2 @@
+# Agent worktrees, created per-session and not part of the repo's history
+.claude/worktrees/
