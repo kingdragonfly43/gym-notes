@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PROTOTYPE — Screen designs (round 2)</title>
+<!--
+  THROWAWAY PROTOTYPE. Not app code. Issue #10 "Set-entry hot path", round 2.
+
+  Round 1 (index.html, same folder) offered three navigation SHAPES for the whole
+  hot path. The user picked shape A — screen per exercise, the FitNotes shape:
+  a session index, an exercise picker, a dedicated entry screen. Their feedback:
+  "I like the navigation flow of A, but each screen has details that need
+  additional design." So round 2 fixes A's navigation and explores the DESIGN of
+  each of its four screens instead. Visual language, phone frame (375x667, iPhone
+  SE 3), tap counter and HUD are reused from round 1; only the switcher mechanic
+  is upgraded to work per-screen instead of per-whole-app.
+
+  Four screens, each with 3 structurally different variants, switchable
+  INDEPENDENTLY via ?index=&picker=&entry=&new= (1-3 each) and the floating
+  bottom bar, which always acts on whichever screen is currently on-screen.
+  Left/right arrow keys cycle the same way (ignored while an input is focused).
+  Session state (Session -> Superset -> Round -> Set -> Step) is shared across
+  every combination, so navigation works end to end no matter which variants
+  are picked: index -> picker -> entry -> save -> back to index, and
+  picker -> new exercise form -> created -> entry.
+-->
+<style>
+  :root{
+    --bg:#0d0f12; --panel:#15181d; --panel2:#1c2027; --line:#272c34;
+    --ink:#eef1f5; --dim:#8b95a3; --accent:#4ea3ff; --good:#3ddc84; --warn:#ffb020; --pr:#ffd23f;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:#07080a;color:var(--ink);
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex;gap:28px;align-items:flex-start;justify-content:center;
+    padding:28px 20px 110px;flex-wrap:wrap}
+  h1,h2,h3,h4{margin:0}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  button[disabled]{opacity:.4;pointer-events:none}
+  input,textarea{font:inherit}
+
+  /* ---- phone frame ---- */
+  .phone{width:375px;height:667px;background:var(--bg);border-radius:26px;
+    border:1px solid #2b3039;overflow:hidden;position:relative;display:flex;flex-direction:column;
+    box-shadow:0 24px 60px rgba(0,0,0,.6)}
+  .statusbar{height:22px;flex:none;display:flex;align-items:center;justify-content:space-between;
+    padding:0 14px;font-size:11px;color:var(--dim);background:#0a0c0f}
+  .screen{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+  .scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+  .ad{flex:none;height:50px;background:#22262d;border-top:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;color:#5d6672;font-size:11px;
+    letter-spacing:.08em;text-transform:uppercase}
+
+  /* ---- shared atoms ---- */
+  .row{display:flex;align-items:center;gap:8px}
+  .sp{flex:1}
+  .dim{color:var(--dim)}
+  .tiny{font-size:11px}
+  .hdr{flex:none;padding:10px 14px;border-bottom:1px solid var(--line);background:#111419}
+  .num{font-variant-numeric:tabular-nums;font-family:var(--mono)}
+  .pill{display:inline-block;padding:2px 7px;border-radius:99px;font-size:10px;font-weight:700;
+    letter-spacing:.04em}
+  .pill.pr{background:var(--pr);color:#3a2f00}
+  .pill.half{background:#3a3146;color:#cbb3ff}
+  .pill.drop{background:#3a2a2a;color:#ffb3b3}
+  .pill.bw{background:#17323f;color:#8fd4f5}
+  .btn{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:10px 12px;font-weight:600}
+  .btn.primary{background:var(--accent);color:#06213d;border-color:transparent}
+  .btn.big{padding:16px;font-size:17px;border-radius:14px;width:100%;text-align:center}
+
+  /* ---- HUD ---- */
+  .hud{width:330px;font-size:12px}
+  .hud h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);
+    margin-bottom:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;
+    margin-bottom:12px}
+  .taps{font-family:var(--mono);font-size:34px;font-weight:700}
+  .task{color:var(--warn);font-size:12px;line-height:1.5}
+  pre{margin:0;font-family:var(--mono);font-size:11px;line-height:1.45;color:#b9c2cf;
+    white-space:pre-wrap;max-height:320px;overflow:auto}
+  .hud .btn{padding:7px 10px;font-size:12px}
+  .qs li{margin-bottom:8px;color:#c3ccd8}
+  .qs{padding-left:16px;margin:0}
+
+  /* ---- switcher ---- */
+  .switcher{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:99;
+    display:flex;align-items:center;gap:4px;background:#fff;color:#111;border-radius:99px;
+    padding:6px;box-shadow:0 10px 30px rgba(0,0,0,.5);font-weight:700}
+  .switcher button{padding:6px 12px;border-radius:99px;font-size:18px;line-height:1}
+  .switcher button:hover{background:#eceff3}
+  .switcher .lbl{padding:0 12px;font-size:13px;white-space:nowrap}
+
+  /* =================== shared row bits (used by index + entry "today" lists) === */
+  .ix1-row{padding:12px 14px;border-bottom:1px solid var(--line)}
+  .ix1-set{display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px}
+  .pk-row{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+  .pk-search{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:10px;color:var(--ink);font:inherit}
+  .a1-stepper{display:flex;align-items:center;justify-content:space-between;gap:8px;
+    background:var(--panel2);border-radius:14px;padding:8px;margin-bottom:10px}
+  .a1-stepper .v{font-family:var(--mono);font-size:30px;font-weight:700;min-width:92px;text-align:center}
+  .pm{width:52px;height:52px;border-radius:12px;background:#2a3038;font-size:24px;
+    display:flex;align-items:center;justify-content:center}
+
+  /* =================== INDEX variant 1: chronological ledger =================== */
+  /* (uses .ix1-row / .ix1-set above) */
+
+  /* =================== INDEX variant 2: stats + card grid =================== */
+  .ix2-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px}
+  .ix2-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}
+  .ix2-fab{position:absolute;right:14px;bottom:64px;width:50px;height:50px;border-radius:99px;
+    background:var(--accent);color:#06213d;font-size:26px;font-weight:800;display:flex;
+    align-items:center;justify-content:center;box-shadow:0 8px 18px rgba(0,0,0,.45)}
+
+  /* =================== INDEX variant 3: hero + accordion =================== */
+  .ix3-hero{margin:12px;background:linear-gradient(180deg,#182233,#12161b);
+    border:1px solid var(--accent);border-radius:16px;padding:16px}
+  .ix3-acc{margin:0 12px 8px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+
+  /* =================== PICKER variant 1: category tree =================== */
+  .pk1-catlist{display:flex;flex-direction:column;gap:8px;padding:6px 14px 14px}
+  .pk1-catrow{display:flex;align-items:center;gap:10px;background:var(--panel2);border-radius:10px;
+    border-left:4px solid var(--accent);padding:14px;min-height:48px}
+  .pk1-catrow .chev{color:var(--dim);font-size:18px;line-height:1}
+
+  /* =================== PICKER variant 2: search-first + recents =================== */
+  .pk2-chips{display:flex;gap:6px;overflow-x:auto;padding:0 14px 8px}
+  .pk2-chip{flex:none;background:var(--panel2);border:1px solid var(--line);border-radius:99px;
+    padding:7px 12px;font-size:12px;font-weight:600;white-space:nowrap}
+  .pk2-catrow{display:flex;gap:6px;overflow-x:auto;padding:0 14px 10px}
+  .pk2-catchip{flex:none;background:transparent;border:1px solid var(--line);border-radius:99px;
+    padding:5px 10px;font-size:11px;color:var(--dim);white-space:nowrap}
+  .pk2-catchip.on{background:var(--accent);color:#06213d;border-color:transparent;font-weight:700}
+
+  /* =================== PICKER variant 3: flat A-Z + rail =================== */
+  .pk3-wrap{flex:1;display:flex;min-height:0}
+  .pk3-wrap .scroll{flex:1}
+  .pk3-rail{width:20px;flex:none;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:1px;padding:4px 2px;font-size:9px;color:#3a4048}
+  .pk3-railL.on{color:var(--accent);font-weight:700}
+  .pk3-letter{position:sticky;top:0;background:#11151a;color:var(--dim);font-size:11px;font-weight:700;
+    padding:4px 14px;letter-spacing:.05em;z-index:1}
+
+  /* =================== ENTRY variant 2: inline keypad =================== */
+  .en2-tile{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:12px;text-align:center}
+  .en2-tile.active{border-color:var(--accent)}
+  .en2-tile .v{font-family:var(--mono);font-size:26px;font-weight:800;margin-top:4px}
+  .en2-dock{flex:none;background:#10141a;border-top:1px solid var(--line);padding:10px 12px}
+  .en2-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .en2-grid button{background:#232830;border-radius:10px;padding:12px 0;font-size:18px;font-weight:700}
+
+  /* =================== ENTRY variant 3: confirm-first =================== */
+  .en3-hero{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:16px 10px;margin:8px 0}
+  .en3-dock{flex:none;background:#10141a;border-top:1px solid var(--line);padding:10px 12px}
+  .en3-adjust{margin-bottom:8px}
+
+  /* =================== NEW EXERCISE shared bits =================== */
+  .nx-catrow{display:flex;gap:6px;flex-wrap:wrap}
+  .nx-chip{background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:7px 12px;
+    font-size:12px;font-weight:600}
+  .nx-chip.on{background:var(--accent);color:#06213d;border-color:transparent}
+  .nx-seg{display:flex;gap:6px}
+  .nx-seg button{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:10px;font-size:12px;font-weight:600}
+  .nx-seg button.on{background:var(--accent);color:#06213d;border-color:transparent}
+  .nx-notes{width:100%;min-height:70px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:10px;padding:10px;color:var(--ink);font:inherit;resize:vertical}
+  .nx-bigname{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:12px;
+    padding:14px;color:var(--ink);font-size:18px;font-weight:700;font:inherit}
+  .nx3-dot{width:8px;height:8px;border-radius:99px;background:#2a3038}
+  .nx3-dot.on{background:var(--accent)}
+  .nx3-dot.done{background:#3ddc84}
+  .nx3-catgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .nx3-tile{background:var(--panel2);border-radius:12px;padding:18px 12px;font-weight:700;
+    border:2px solid transparent;text-align:center}
+  .nx3-tile.on{border-color:var(--accent);color:var(--accent)}
+</style>
+</head>
+<body>
+
+<div class="phone"><div class="statusbar"><span>9:41</span><span id="sbmid"></span><span>100%</span></div><div class="screen" id="screen"></div></div>
+
+<div class="hud">
+  <div class="card">
+    <h2>Try this</h2>
+    <div class="task" id="taskline"></div>
+    <div class="row" style="margin-top:10px">
+      <div><div class="taps" id="taps">0</div><div class="tiny dim">interactions since cold open</div>
+        <div class="tiny dim" id="tapsbreak"></div></div>
+      <div class="sp"></div>
+      <button class="btn" data-reset>Cold open ⟲</button>
+    </div>
+    <div class="tiny" id="verdict" style="margin-top:8px;color:var(--good)"></div>
+  </div>
+  <div class="card">
+    <h2>Session state</h2>
+    <pre id="state"></pre>
+  </div>
+  <div class="card">
+    <h2>What this screen's 3 variants bet on</h2>
+    <ul class="qs tiny" id="notes"></ul>
+  </div>
+</div>
+
+<div class="switcher">
+  <button data-nav="-1">‹</button><span class="lbl" id="vlabel"></span><button data-nav="1">›</button>
+</div>
+
+<script>
+/* ============================ DATA ============================ */
+const CATS = ['Back','Chest','Shoulders','Legs','Arms','Core'];
+const EXS = [
+  ['lat-pulldown','Lat Pulldown','Back','weight','Technogym'],
+  ['barbell-row','Barbell Row','Back','weight',''],
+  ['seated-row','Seated Cable Row','Back','weight','Life Fitness'],
+  ['face-pull','Face Pull','Back','weight',''],
+  ['pull-up','Pull Up','Back','bodyweight',''],
+  ['chin-up','Chin Up','Back','bodyweight',''],
+  ['deadlift','Deadlift','Back','weight',''],
+  ['t-bar-row','T-Bar Row','Back','weight',''],
+  ['bench-press','Bench Press','Chest','weight',''],
+  ['incline-db-press','Incline DB Press','Chest','weight',''],
+  ['cable-fly','Cable Fly','Chest','weight','Technogym'],
+  ['dip','Dip','Chest','bodyweight',''],
+  ['push-up','Push Up','Chest','bodyweight',''],
+  ['ohp','Overhead Press','Shoulders','weight',''],
+  ['lateral-raise','Lateral Raise','Shoulders','weight',''],
+  ['rear-delt-fly','Rear Delt Fly','Shoulders','weight',''],
+  ['squat','Back Squat','Legs','weight',''],
+  ['leg-press','Leg Press','Legs','weight','Hammer'],
+  ['rdl','Romanian Deadlift','Legs','weight',''],
+  ['leg-curl','Leg Curl','Legs','weight',''],
+  ['leg-extension','Leg Extension','Legs','weight',''],
+  ['calf-raise','Standing Calf Raise','Legs','weight',''],
+  ['bb-curl','Barbell Curl','Arms','weight',''],
+  ['hammer-curl','Hammer Curl','Arms','weight',''],
+  ['tricep-pushdown','Tricep Pushdown','Arms','weight',''],
+  ['skullcrusher','Skullcrusher','Arms','weight',''],
+  ['preacher-curl','Preacher Curl','Arms','weight',''],
+  ['cable-crunch','Cable Crunch','Core','weight',''],
+  ['hanging-leg-raise','Hanging Leg Raise','Core','bodyweight',''],
+  ['plank','Plank','Core','bodyweight',''],
+].map(([id,name,cat,type,brand])=>({id,name,cat,type,brand,unit:'lb',notes:''}));
+const EX = Object.fromEntries(EXS.map(e=>[e.id,e]));
+
+/* Simplified single-point history per exercise: the last time it was trained,
+   used both to prefill a fresh set and as the PR baseline it must beat. */
+const HIST = {
+  'lat-pulldown': {w:130, r:8,  days:4,  prVol:1040},
+  'barbell-row' : {w:155, r:8,  days:4,  prVol:1240},
+  'face-pull'   : {w:50,  r:15, days:4,  prVol:750},
+  'pull-up'     : {w:0,   r:9,  days:4,  prReps:10},
+  'cable-crunch': {w:100, r:12, days:11, prVol:1200},
+  'bench-press' : {w:185, r:5,  days:6,  prVol:925},
+  'squat'       : {w:225, r:5,  days:6,  prVol:1125},
+  'deadlift'    : {w:275, r:5,  days:9,  prVol:1375},
+  'seated-row'  : {w:120, r:10, days:6,  prVol:1200},
+};
+const INCR = 5; // lb — global increment. Never 2.5, never kg.
+
+/* ============================ STATE ============================ */
+let taps, keystrokes, S, screen, V, pk, en, nx, ix, recents, lastSetAt;
+
+function coldOpen(){
+  taps = 0;
+  keystrokes = 0;
+  lastSetAt = null; // no set logged yet this session — rest timer shows resting state
+  S = {
+    agenda: 'Back, Core',
+    startedAt: '6:04 PM',
+    elapsed: '41 min',
+    supersets: [
+      { lineup:['lat-pulldown'],
+        rounds:[ { sets:[ {ex:'lat-pulldown', steps:[{w:135,r:10,ratio:1}]} ] } ] },
+      { lineup:['barbell-row','face-pull'], rounds:[] },
+    ],
+  };
+  recents = ['lat-pulldown','barbell-row','face-pull','bench-press','squat'];
+  pk = { search:'', cat:null, chip:'All', jumpTo:null };
+  en = { ssIdx:null, exId:null, w:0, r:0, half:false, steps:[], keypadTarget:null, keypadBuf:'', adjustOpen:false };
+  nx = { name:'', cat:null, type:'weight', notes:'', brand:'', step:1, moreOpen:false };
+  ix = { expanded:{} };
+  screen = 'index';
+  render();
+}
+
+/* ============================ DOMAIN HELPERS ============================ */
+function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;'); }
+
+function prefillFor(exId){
+  // top step of this exercise's last set: this session first, else last session, else a guess.
+  // steps[0] is the TOP set — a drop set descends from there, and the top set is the
+  // weight the lifter actually repeats next time, not the lightest drop at steps[length-1].
+  for(let i=S.supersets.length-1;i>=0;i--){
+    const ss=S.supersets[i];
+    for(let r=ss.rounds.length-1;r>=0;r--)
+      for(let k=ss.rounds[r].sets.length-1;k>=0;k--){
+        const st=ss.rounds[r].sets[k];
+        if(st.ex===exId){
+          const top=st.steps[0];
+          return {w:top.w, r:top.r, src:'this session'};
+        }
+      }
+  }
+  const h=HIST[exId];
+  if(h) return {w:h.w, r:h.r, src:h.days+'d ago'};
+  const e=EX[exId];
+  return {w: e && e.type==='bodyweight' ? 0 : 45, r:10, src:'never trained'};
+}
+function prevLine(exId){
+  const p=prefillFor(exId);
+  if(p.src==='never trained') return 'No previous — new exercise';
+  const e=EX[exId];
+  const wLabel = e.type==='bodyweight' ? (p.w===0?'bodyweight':(p.w>0?'BW+'+p.w:'BW'+p.w)) : p.w+' lb';
+  return `Previous: ${wLabel} × ${p.r} · ${p.src}`;
+}
+function volume(set){ return set.steps.reduce((a,s)=>a+s.w*s.r*s.ratio,0); }
+function bestPriorValue(exId, excludeSet){
+  const e=EX[exId]; const h=HIST[exId];
+  let best = h ? (e.type==='bodyweight' ? (h.prReps??0) : (h.prVol??0)) : 0;
+  S.supersets.forEach(ss=>ss.rounds.forEach(rd=>rd.sets.forEach(st=>{
+    if(st.ex!==exId || st===excludeSet) return;
+    const val = e.type==='bodyweight' ? st.steps.reduce((a,s)=>a+s.r,0) : volume(st);
+    if(val>best) best=val;
+  })));
+  return best;
+}
+function isPR(set){
+  const e=EX[set.ex];
+  const val = e.type==='bodyweight' ? set.steps.reduce((a,s)=>a+s.r,0) : volume(set);
+  return val > bestPriorValue(set.ex, set);
+}
+function stepStr(exId, s){
+  const e=EX[exId];
+  const w = e.type==='bodyweight' ? (s.w===0?'BW':(s.w>0?'BW+'+s.w:'BW'+s.w)) : s.w+' lb';
+  return `${w} × ${s.r}`;
+}
+function setLabel(set){ return set.steps.map(s=>stepStr(set.ex,s)).join(' > '); }
+function badgesFor(set){
+  let h='';
+  if(set.steps.length>1) h+='<span class="pill drop">DROP</span>';
+  if(set.steps.some(s=>s.ratio<1)) h+='<span class="pill half">HALF</span>';
+  if(isPR(set)) h+='<span class="pill pr">PR</span>';
+  return h;
+}
+function nextTarget(ssIdx){
+  const ss=S.supersets[ssIdx];
+  const last=ss.rounds[ss.rounds.length-1];
+  if(!last || last.sets.length>=ss.lineup.length)
+    return {round:ss.rounds.length, i:0, ex:ss.lineup[0]};
+  return {round:ss.rounds.length-1, i:last.sets.length, ex:ss.lineup[last.sets.length]};
+}
+function logSetSteps(ssIdx, exId, steps){
+  const ss=S.supersets[ssIdx];
+  let round=ss.rounds[ss.rounds.length-1];
+  if(!round || round.sets.length>=ss.lineup.length){ round={sets:[]}; ss.rounds.push(round); }
+  round.sets.push({ex:exId, steps});
+}
+function addDropStep(){
+  en.steps.push({w:en.w, r:en.r, ratio: en.half?0.5:1});
+  const e=EX[en.exId];
+  en.w = e.type==='bodyweight' ? en.w-INCR : Math.max(0, en.w-INCR*2);
+  en.r = Math.max(1, en.r-3);
+  en.half = false;
+}
+function bumpRecent(exId){ recents = [exId, ...recents.filter(x=>x!==exId)].slice(0,6); }
+function sessionStats(){
+  let sets=0, vol=0;
+  S.supersets.forEach(ss=>ss.rounds.forEach(rd=>rd.sets.forEach(st=>{
+    sets++; if(EX[st.ex].type==='weight') vol+=volume(st);
+  })));
+  return {sets, vol};
+}
+
+/* ============================ NAVIGATION ============================ */
+function goIndex(){ screen='index'; }
+function goPicker(){ pk.search=''; pk.cat=null; pk.chip='All'; pk.jumpTo=null; screen='picker'; }
+function goNewExerciseForm(){ nx={name:'',cat:null,type:'weight',notes:'',brand:'',step:1,moreOpen:false}; screen='new'; }
+function startEntry(ssIdx, exId){
+  en.ssIdx=ssIdx; en.exId=exId;
+  const p=prefillFor(exId);
+  en.w=p.w; en.r=p.r; en.half=false; en.steps=[];
+  en.keypadTarget=null; en.keypadBuf=''; en.adjustOpen=false;
+  bumpRecent(exId);
+  screen='entry';
+}
+function pickExercise(exId){
+  let ssIdx = S.supersets.findIndex(s=>s.lineup.includes(exId));
+  if(ssIdx<0){ ssIdx=S.supersets.length; S.supersets.push({lineup:[exId], rounds:[]}); }
+  startEntry(ssIdx, exId);
+}
+function slugify(s){ return (s.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')) || 'exercise'; }
+function createExercise(){
+  if(!nx.name.trim() || !nx.cat) return;
+  let id=slugify(nx.name), n=2;
+  while(EX[id]){ id=slugify(nx.name)+'-'+n; n++; }
+  const e={id, name:nx.name.trim(), cat:nx.cat, type:nx.type, unit:'lb', brand:nx.brand.trim(), notes:nx.notes.trim()};
+  EXS.push(e); EX[id]=e;
+  pickExercise(id);
+}
+function saveSet(){
+  const steps=[...en.steps, {w:en.w, r:en.r, ratio: en.half?0.5:1}];
+  logSetSteps(en.ssIdx, en.exId, steps);
+  lastSetAt = Date.now();
+  const t=nextTarget(en.ssIdx);
+  startEntry(en.ssIdx, t.ex);
+}
+function restLabel(){
+  if(lastSetAt==null) return '—';
+  const secs = Math.max(0, Math.floor((Date.now()-lastSetAt)/1000));
+  const m = Math.floor(secs/60), s = secs%60;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+function heroTarget(){
+  for(let i=0;i<S.supersets.length;i++){
+    const ss=S.supersets[i]; const last=ss.rounds[ss.rounds.length-1];
+    if(last && last.sets.length<ss.lineup.length) return {ssIdx:i, ...nextTarget(i)};
+  }
+  for(let i=0;i<S.supersets.length;i++) if(S.supersets[i].rounds.length===0) return {ssIdx:i, ...nextTarget(i)};
+  const i=S.supersets.length-1;
+  return {ssIdx:i, ...nextTarget(i)};
+}
+
+/* ============================ SHARED FRAGMENTS ============================ */
+function pkSearchBox(){
+  return `<div style="padding:12px 14px 6px"><input id="pkSearch" class="pk-search"
+    placeholder="Search all exercises…" value="${escapeAttr(pk.search)}" oninput="pkSearchInput(this)"></div>`;
+}
+function pkSearchInput(el){
+  pk.search = el.value;
+  keystrokes++;
+  const pos = el.selectionStart;
+  render();
+  const again = document.getElementById('pkSearch');
+  if(again){ again.focus(); try{ again.setSelectionRange(pos,pos); }catch(e){} }
+}
+function pk1Row(e){
+  const h=HIST[e.id];
+  const prevTxt = h ? (h.w===0?'BW':h.w+' lb')+' × '+h.r : '—';
+  return `<div class="pk-row" data-act="pk-pick" data-ex="${e.id}">
+    <span>${e.name}</span>${e.type==='bodyweight'?'<span class="pill bw">BW</span>':''}
+    <div class="sp"></div><span class="tiny dim">${prevTxt}</span></div>`;
+}
+function nxCatChips(){
+  return `<div class="nx-catrow">${CATS.map(c=>
+    `<button class="nx-chip ${nx.cat===c?'on':''}" data-act="nx-cat" data-cat="${c}">${c}</button>`).join('')}</div>`;
+}
+function nxTypeSeg(){
+  return `<div class="nx-seg">
+    <button class="${nx.type==='weight'?'on':''}" data-act="nx-type" data-t="weight">Weight &amp; reps</button>
+    <button class="${nx.type==='bodyweight'?'on':''}" data-act="nx-type" data-t="bodyweight">Bodyweight &amp; reps</button>
+  </div>`;
+}
+function enHeader(withTimer){
+  const e=EX[en.exId];
+  const timer = withTimer ? `<div style="margin-left:auto;text-align:right">
+    <div class="tiny dim" style="letter-spacing:.06em;text-transform:uppercase">Rest</div>
+    <div class="num" id="enRest" style="font-size:18px;font-weight:700">${restLabel()}</div>
+  </div>` : '';
+  return `<div class="hdr"><div class="row"><button class="btn tiny" data-act="en-back">‹</button>
+    <div style="margin-left:8px"><b>${e.name}</b><div class="tiny dim">${e.cat}${e.brand?' · '+e.brand:''}</div></div>
+    ${timer}</div></div>`;
+}
+function enTodayList(showLabel){
+  const ss=S.supersets[en.ssIdx];
+  let rows='';
+  ss.rounds.forEach((rd,ri)=>rd.sets.forEach(st=>{
+    if(st.ex!==en.exId) return;
+    rows+=`<div class="ix1-set"><span class="dim" style="width:20px">${ri+1}</span>
+      <span class="num">${setLabel(st)}</span>${badgesFor(st)}</div>`;
+  }));
+  if(!rows) return '';
+  const label = showLabel===false ? '' : '<div class="tiny dim" style="margin:10px 0 4px">TODAY</div>';
+  return `${label}${rows}`;
+}
+function enComposingNote(){
+  if(!en.steps.length) return '';
+  return `<div class="tiny dim" style="margin-bottom:8px">Building this set: ${en.steps.map(s=>stepStr(en.exId,s)).join(' > ')} > …</div>`;
+}
+
+/* ============================ INDEX ============================ */
+function IDX1(){
+  let body='';
+  S.supersets.forEach((ss,i)=>{
+    const names=ss.lineup.map(x=>EX[x].name).join('  +  ');
+    let sets='';
+    ss.rounds.forEach((rd,ri)=>rd.sets.forEach(st=>{
+      sets+=`<div class="ix1-set"><span class="dim num" style="width:20px">${ri+1}</span>
+        <span class="dim" style="width:88px">${EX[st.ex].name.split(' ')[0]}</span>
+        <span class="num">${setLabel(st)}</span>${badgesFor(st)}</div>`;
+    }));
+    if(!sets) sets='<div class="tiny dim" style="padding:3px 0">No sets yet — tap to start</div>';
+    body+=`<div class="ix1-row" data-act="idx-open" data-ss="${i}">
+      <div class="row"><b>${names}</b><div class="sp"></div>
+      ${ss.lineup.length>1?'<span class="pill" style="background:#243043;color:#8fb8e8">SUPERSET</span>':''}</div>
+      <div style="margin-top:5px">${sets}</div></div>`;
+  });
+  return `
+  <div class="hdr"><div class="row"><div>
+    <b>Today</b> <span class="dim tiny">· ${S.agenda}</span>
+    <div class="tiny dim">started ${S.startedAt} · ${S.elapsed} elapsed</div>
+  </div><div class="sp"></div></div></div>
+  <div class="scroll">${body}
+    <div style="padding:14px"><button class="btn big" data-act="idx-add">+ ADD EXERCISE</button></div>
+  </div>
+  <div class="ad">Ad · 320×50</div>`;
+}
+function IDX2(){
+  const stats=sessionStats();
+  let cards='';
+  S.supersets.forEach((ss,i)=>{
+    ss.lineup.forEach(exId=>{
+      const e=EX[exId];
+      let latest=null, count=0;
+      ss.rounds.forEach(rd=>rd.sets.forEach(st=>{ if(st.ex===exId){ latest=st; count++; } }));
+      const partner = ss.lineup.length>1 ? ss.lineup.filter(x=>x!==exId).map(x=>EX[x].name).join(' + ') : '';
+      cards += `<div class="ix2-card" data-act="idx-open" data-ss="${i}" data-ex="${exId}">
+        <div class="row"><b class="tiny">${e.name}</b>${e.type==='bodyweight'?'<span class="pill bw">BW</span>':''}</div>
+        ${partner?`<div class="tiny dim">+ ${partner}</div>`:''}
+        <div class="num" style="margin-top:6px">${latest?setLabel(latest):'—'}</div>
+        <div class="row" style="margin-top:4px">${latest?badgesFor(latest):''}<div class="sp"></div>
+        <span class="tiny dim">${count} set${count===1?'':'s'}</span></div>
+      </div>`;
+    });
+  });
+  return `
+  <div class="hdr">
+    <div class="tiny dim">${S.agenda} · started ${S.startedAt}</div>
+    <div class="row" style="margin-top:4px;gap:18px">
+      <div><div class="num" style="font-size:22px;font-weight:800">${S.elapsed}</div><div class="tiny dim">elapsed</div></div>
+      <div><div class="num" style="font-size:22px;font-weight:800">${stats.sets}</div><div class="tiny dim">sets</div></div>
+      <div><div class="num" style="font-size:22px;font-weight:800">${stats.vol}</div><div class="tiny dim">lb volume</div></div>
+    </div>
+  </div>
+  <div class="scroll"><div class="ix2-grid">${cards}</div><div style="height:56px"></div></div>
+  <button class="ix2-fab" data-act="idx-add">+</button>
+  <div class="ad">Ad · 320×50</div>`;
+}
+function IDX3(){
+  const h=heroTarget();
+  const e=EX[h.ex]; const heroSS=S.supersets[h.ssIdx];
+  let acc='';
+  S.supersets.forEach((ss2,i)=>{
+    const names=ss2.lineup.map(x=>EX[x].name).join(' + ');
+    let count=0; ss2.rounds.forEach(rd=>count+=rd.sets.length);
+    const isOpen=!!ix.expanded[i];
+    let inner='';
+    if(isOpen){
+      ss2.rounds.forEach((rd,ri)=>rd.sets.forEach(st=>{
+        inner+=`<div class="ix1-set" data-act="idx-open" data-ss="${i}" data-ex="${st.ex}">
+          <span class="dim" style="width:20px">${ri+1}</span>
+          <span class="dim" style="width:88px">${EX[st.ex].name.split(' ')[0]}</span>
+          <span class="num">${setLabel(st)}</span>${badgesFor(st)}</div>`;
+      }));
+      if(!count) inner='<div class="tiny dim" style="padding:4px 0">not started</div>';
+    }
+    acc+=`<div class="ix3-acc">
+      <div class="row" data-act="idx-toggle" data-ss="${i}" style="padding:10px 12px">
+        <span class="tiny">${isOpen?'▾':'▸'}</span>
+        <b class="tiny" style="margin-left:6px">${names}</b>
+        <div class="sp"></div><span class="tiny dim">${count} set${count===1?'':'s'}</span>
+      </div>
+      ${inner?`<div style="padding:0 12px 10px">${inner}</div>`:''}
+    </div>`;
+  });
+  return `
+  <div class="hdr"><div class="tiny dim">${S.agenda} · ${S.elapsed} elapsed</div></div>
+  <div class="scroll">
+    <div class="ix3-hero" data-act="idx-open" data-ss="${h.ssIdx}" data-ex="${h.ex}">
+      <div class="tiny" style="letter-spacing:.1em;text-transform:uppercase;color:var(--accent)">Up next${heroSS.lineup.length>1?' · superset':''}</div>
+      <div style="font-size:26px;font-weight:800;margin:4px 0">${e.name}</div>
+      <div class="tiny dim">${prevLine(h.ex)}</div>
+      <button class="btn primary big" style="margin-top:10px">CONTINUE →</button>
+    </div>
+    <div style="padding:0 12px 4px" class="tiny dim">SESSION</div>
+    ${acc}
+    <div style="padding:14px"><button class="btn" style="width:100%" data-act="idx-add">+ add exercise</button></div>
+  </div>
+  <div class="ad">Ad · 320×50</div>`;
+}
+
+/* ============================ PICKER ============================ */
+function PK1(){
+  let inner;
+  if(pk.search.trim()){
+    const q=pk.search.toLowerCase();
+    const results=EXS.filter(e=>e.name.toLowerCase().includes(q));
+    inner = `${pkSearchBox()}${results.map(pk1Row).join('') || '<div class="tiny dim" style="padding:14px">No matches</div>'}`;
+  } else if(!pk.cat){
+    inner = `${pkSearchBox()}
+      <div class="pk1-catlist">${CATS.map(c=>`<div class="pk1-catrow" data-act="pk-cat" data-cat="${c}">
+        <div class="sp"><div style="font-weight:700">${c}</div>
+          <div class="tiny dim">${EXS.filter(e=>e.cat===c).length} exercises</div></div>
+        <span class="chev">›</span></div>`).join('')}</div>
+      <div style="padding:0 14px 14px"><button class="btn big" data-act="pk-new">+ NEW EXERCISE</button></div>`;
+  } else {
+    const list=EXS.filter(e=>e.cat===pk.cat);
+    inner = `<div class="row" style="padding:10px 14px"><button class="btn tiny" data-act="pk-catback">‹ Categories</button>
+        <b style="margin-left:8px">${pk.cat}</b></div>
+      ${list.map(pk1Row).join('')}
+      <div style="padding:14px"><button class="btn big" data-act="pk-new">+ NEW EXERCISE</button></div>`;
+  }
+  return `<div class="hdr"><div class="row"><button class="btn tiny" data-act="pk-back">‹</button>
+      <b style="margin-left:8px">Choose exercise</b></div></div>
+    <div class="scroll">${inner}</div>
+    <div class="ad">Ad · 320×50</div>`;
+}
+function PK2(){
+  const q=pk.search.trim().toLowerCase();
+  const chip=pk.chip||'All';
+  let list;
+  if(q) list=EXS.filter(e=>e.name.toLowerCase().includes(q));
+  else list = chip==='All' ? EXS.slice() : EXS.filter(e=>e.cat===chip);
+  const recentExs = recents.map(id=>EX[id]).filter(Boolean);
+  return `<div class="hdr"><div class="row"><button class="btn tiny" data-act="pk-back">‹</button>
+      <b style="margin-left:8px">Choose exercise</b></div></div>
+    <div class="scroll">
+      ${pkSearchBox()}
+      ${!q ? `<div class="tiny dim" style="padding:2px 14px 4px">RECENT</div>
+        <div class="pk2-chips">${recentExs.map(e=>`<button class="pk2-chip" data-act="pk-pick" data-ex="${e.id}">${e.name}</button>`).join('')}</div>` : ''}
+      <div class="pk2-catrow">
+        <button class="pk2-catchip ${chip==='All'?'on':''}" data-act="pk-catchip" data-cat="All">All</button>
+        ${CATS.map(c=>`<button class="pk2-catchip ${chip===c?'on':''}" data-act="pk-catchip" data-cat="${c}">${c}</button>`).join('')}
+      </div>
+      ${list.map(pk1Row).join('') || '<div class="tiny dim" style="padding:14px">No matches</div>'}
+      <div style="padding:14px"><button class="btn big" data-act="pk-new">+ NEW EXERCISE</button></div>
+    </div>
+    <div class="ad">Ad · 320×50</div>`;
+}
+function PK3(){
+  const q=pk.search.trim().toLowerCase();
+  let list=EXS.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  if(q) list=list.filter(e=>e.name.toLowerCase().includes(q));
+  const groups={};
+  list.forEach(e=>{ const L=e.name[0].toUpperCase(); (groups[L]=groups[L]||[]).push(e); });
+  const letters=Object.keys(groups).sort();
+  const allLetters='ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  let body='';
+  letters.forEach(L=>{
+    body += `<div class="pk3-letter" id="L-${L}">${L}</div>`;
+    groups[L].forEach(e=>{ body += pk1Row(e); });
+  });
+  return `<div class="hdr"><div class="row"><button class="btn tiny" data-act="pk-back">‹</button>
+      <b style="margin-left:8px">Choose exercise</b></div></div>
+    <div class="pk3-wrap">
+      <div class="scroll">${pkSearchBox()}${body || '<div class="tiny dim" style="padding:14px">No matches</div>'}
+        <div style="padding:14px"><button class="btn big" data-act="pk-new">+ NEW EXERCISE</button></div>
+      </div>
+      <div class="pk3-rail">${allLetters.map(L=>
+        `<div class="pk3-railL ${letters.includes(L)?'on':''}" ${letters.includes(L)?`data-act="pk-rail" data-letter="${L}"`:''}>${L}</div>`).join('')}</div>
+    </div>
+    <div class="ad">Ad · 320×50</div>`;
+}
+
+/* ============================ ENTRY ============================ */
+function EN1(){
+  const e=EX[en.exId];
+  return `${enHeader(true)}
+  <div class="scroll" style="padding:12px">
+    ${enComposingNote()}
+    <div class="a1-stepper"><button class="pm" data-act="en-w" data-d="-1">−</button>
+      <div><div class="v num">${en.w}</div><div class="tiny dim" style="text-align:center">${e.type==='bodyweight'?'lb added':'lb'}</div></div>
+      <button class="pm" data-act="en-w" data-d="1">+</button></div>
+    <div class="a1-stepper"><button class="pm" data-act="en-r" data-d="-1">−</button>
+      <div><div class="v num">${en.r}</div><div class="tiny dim" style="text-align:center">reps</div></div>
+      <button class="pm" data-act="en-r" data-d="1">+</button></div>
+    <div class="row" style="gap:8px;margin-bottom:10px">
+      <button class="btn" style="flex:1;${en.half?'background:#3a3146;color:#cbb3ff':''}" data-act="en-half">½ half reps</button>
+      <button class="btn" style="flex:1" data-act="en-drop">+ drop set</button></div>
+    <button class="btn primary big" data-act="en-save">SAVE SET</button>
+    <div class="tiny dim" style="margin:12px 0 2px">${prevLine(en.exId)}</div>
+    ${enTodayList(false)}
+  </div>
+  <div class="ad">Ad · 320×50</div>`;
+}
+function en2Keypad(){
+  const e=EX[en.exId];
+  const bufShow = en.keypadBuf===''? '0' : en.keypadBuf;
+  const keys=['1','2','3','4','5','6','7','8','9', e.type==='bodyweight'?'±':'', '0','⌫'];
+  return `<div class="en2-dock">
+    <div class="row" style="margin-bottom:6px"><span class="tiny dim">${en.keypadTarget==='w'?(e.type==='bodyweight'?'weight added':'weight (lb)'):'reps'}</span>
+      <div class="sp"></div><span class="v num">${bufShow}</span></div>
+    <div class="en2-grid">${keys.map(k=>{
+        if(k==='') return '<div></div>';
+        if(k==='⌫') return `<button data-act="en2-bksp">⌫</button>`;
+        if(k==='±') return `<button data-act="en2-sign">±</button>`;
+        return `<button data-act="en2-digit" data-n="${k}">${k}</button>`;
+      }).join('')}</div>
+    <div class="row" style="gap:8px;margin-top:8px">
+      <button class="btn" style="flex:1" data-act="en2-cancel">Cancel</button>
+      <button class="btn primary" style="flex:1" data-act="en2-done">Done</button>
+    </div>
+  </div>`;
+}
+function EN2(){
+  const e=EX[en.exId];
+  const wLabel = e.type==='bodyweight' ? (en.w===0?'BW':(en.w>0?'BW+'+en.w:'BW'+en.w)) : en.w+' lb';
+  const dock = en.keypadTarget ? en2Keypad() : `
+    <div class="en2-dock">
+      <div class="row" style="gap:8px;margin-bottom:8px">
+        <button class="btn" style="flex:1;${en.half?'background:#3a3146;color:#cbb3ff':''}" data-act="en-half">½ half</button>
+        <button class="btn" style="flex:1" data-act="en-drop">+ drop</button>
+      </div>
+      <button class="btn primary big" data-act="en-save">SAVE SET</button>
+    </div>`;
+  return `${enHeader()}
+  <div class="scroll" style="padding:12px">
+    ${enComposingNote()}
+    <div class="row" style="gap:8px;margin-bottom:10px">
+      <div class="en2-tile ${en.keypadTarget==='w'?'active':''}" data-act="en2-open" data-f="w">
+        <div class="tiny dim">${e.type==='bodyweight'?'lb added':'lb'}</div><div class="v num">${wLabel}</div></div>
+      <div class="en2-tile ${en.keypadTarget==='r'?'active':''}" data-act="en2-open" data-f="r">
+        <div class="tiny dim">reps</div><div class="v num">${en.r}</div></div>
+    </div>
+    <div class="tiny dim" style="margin-bottom:6px">${prevLine(en.exId)}</div>
+    ${enTodayList()}
+  </div>
+  ${dock}
+  <div class="ad">Ad · 320×50</div>`;
+}
+function EN3(){
+  const e=EX[en.exId];
+  const wLabel = e.type==='bodyweight' ? (en.w===0?'BW':(en.w>0?'BW+'+en.w:'BW'+en.w)) : en.w+' lb';
+  const adjust = en.adjustOpen ? `
+    <div class="en3-adjust">
+      <div class="a1-stepper" style="margin-bottom:6px"><button class="pm" data-act="en-w" data-d="-1">−</button>
+        <div><div class="v num" style="font-size:22px">${en.w}</div><div class="tiny dim" style="text-align:center">${e.type==='bodyweight'?'lb added':'lb'}</div></div>
+        <button class="pm" data-act="en-w" data-d="1">+</button></div>
+      <div class="a1-stepper"><button class="pm" data-act="en-r" data-d="-1">−</button>
+        <div><div class="v num" style="font-size:22px">${en.r}</div><div class="tiny dim" style="text-align:center">reps</div></div>
+        <button class="pm" data-act="en-r" data-d="1">+</button></div>
+      <div class="row" style="gap:8px;margin-top:8px">
+        <button class="btn" style="flex:1;${en.half?'background:#3a3146;color:#cbb3ff':''}" data-act="en-half">½ half</button>
+        <button class="btn" style="flex:1" data-act="en-drop">+ drop</button>
+      </div>
+    </div>` : '';
+  return `${enHeader()}
+  <div class="scroll" style="padding:12px">
+    <div class="tiny dim" style="text-transform:uppercase;letter-spacing:.08em">Last time</div>
+    <div class="en3-hero">
+      ${enComposingNote()}
+      <div class="row" style="justify-content:center;gap:14px">
+        <div class="num" style="font-size:36px;font-weight:800">${wLabel}</div>
+        <div class="dim" style="font-size:22px">×</div>
+        <div class="num" style="font-size:36px;font-weight:800">${en.r}</div>
+      </div>
+      <div class="tiny dim" style="text-align:center;margin-top:4px">${prevLine(en.exId)}</div>
+    </div>
+    ${enTodayList()}
+  </div>
+  <div class="en3-dock">
+    <button class="tiny dim" style="text-align:left;padding:6px 0" data-act="en3-adjust">${en.adjustOpen?'▾ Adjust':'▸ Adjust'}</button>
+    ${adjust}
+    <button class="btn primary big" data-act="en-save">${en.adjustOpen? 'LOG '+wLabel+' × '+en.r : 'SAME AS LAST TIME → LOG'}</button>
+  </div>
+  <div class="ad">Ad · 320×50</div>`;
+}
+
+/* ============================ NEW EXERCISE ============================ */
+function NX1(){
+  return `<div class="hdr"><div class="row"><button class="btn tiny" data-act="nx-back">‹</button>
+      <b style="margin-left:8px">New exercise</b></div></div>
+    <div class="scroll" style="padding:14px">
+      <div class="tiny dim" style="margin-bottom:4px">NAME</div>
+      <input class="pk-search" value="${escapeAttr(nx.name)}" placeholder="e.g. Cable Crossover" oninput="nx.name=this.value">
+      <div class="tiny dim" style="margin:12px 0 4px">CATEGORY</div>
+      ${nxCatChips()}
+      <div class="tiny dim" style="margin:12px 0 4px">MEASUREMENT TYPE</div>
+      ${nxTypeSeg()}
+      <div class="tiny dim" style="margin:12px 0 4px">DEFAULT UNIT</div>
+      <div class="btn" style="width:100%;text-align:center;opacity:.6">lb (fixed)</div>
+      <div class="tiny dim" style="margin:12px 0 4px">MACHINE BRAND <span style="text-transform:none">(optional)</span></div>
+      <input class="pk-search" value="${escapeAttr(nx.brand)}" placeholder="e.g. Technogym" oninput="nx.brand=this.value">
+      <div class="tiny dim" style="margin:12px 0 4px">NOTES</div>
+      <textarea class="nx-notes" placeholder="Setup notes, seat height, grip…" oninput="nx.notes=this.value">${escapeHtml(nx.notes)}</textarea>
+      <button class="btn primary big" style="margin-top:14px" data-act="nx-create">CREATE EXERCISE</button>
+    </div>
+    <div class="ad">Ad · 320×50</div>`;
+}
+function NX2(){
+  return `<div class="hdr"><div class="row"><button class="btn tiny" data-act="nx-back">‹</button>
+      <b style="margin-left:8px">New exercise</b></div></div>
+    <div class="scroll" style="padding:14px">
+      <input class="nx-bigname" value="${escapeAttr(nx.name)}" placeholder="Exercise name" oninput="nx.name=this.value">
+      <div style="margin-top:10px">${nxCatChips()}</div>
+      <button class="btn" style="margin-top:12px;width:100%" data-act="nx-more">${nx.moreOpen?'▾ Hide details':'▸ More details (type, unit, notes, brand)'}</button>
+      ${nx.moreOpen?`
+      <div class="tiny dim" style="margin:12px 0 4px">MEASUREMENT TYPE</div>
+      ${nxTypeSeg()}
+      <div class="tiny dim" style="margin:12px 0 4px">DEFAULT UNIT</div>
+      <div class="btn" style="width:100%;text-align:center;opacity:.6">lb (fixed)</div>
+      <div class="tiny dim" style="margin:12px 0 4px">MACHINE BRAND <span style="text-transform:none">(optional)</span></div>
+      <input class="pk-search" value="${escapeAttr(nx.brand)}" placeholder="e.g. Technogym" oninput="nx.brand=this.value">
+      <div class="tiny dim" style="margin:12px 0 4px">NOTES</div>
+      <textarea class="nx-notes" oninput="nx.notes=this.value">${escapeHtml(nx.notes)}</textarea>` : `
+      <div class="tiny dim" style="margin-top:8px">Defaults to Weight &amp; reps · lb unit if skipped.</div>`}
+      <button class="btn primary big" style="margin-top:16px" data-act="nx-create">CREATE</button>
+    </div>
+    <div class="ad">Ad · 320×50</div>`;
+}
+function NX3(){
+  const steps=['Name','Category','Type & unit','Notes & brand'];
+  const dots = steps.map((s,i)=>`<div class="nx3-dot ${i+1===nx.step?'on':''} ${i+1<nx.step?'done':''}"></div>`).join('');
+  let body='';
+  if(nx.step===1){
+    body = `<div class="tiny dim" style="margin-bottom:6px">What's it called?</div>
+      <input class="nx-bigname" value="${escapeAttr(nx.name)}" placeholder="Exercise name" oninput="nx.name=this.value">
+      <button class="btn primary big" style="margin-top:16px" data-act="nx-wnext" ${!nx.name.trim()?'disabled':''}>NEXT</button>`;
+  } else if(nx.step===2){
+    body = `<div class="tiny dim" style="margin-bottom:6px">Category</div>
+      <div class="nx3-catgrid">${CATS.map(c=>`<div class="nx3-tile ${nx.cat===c?'on':''}" data-act="nx-cat" data-cat="${c}">${c}</div>`).join('')}</div>`;
+  } else if(nx.step===3){
+    body = `<div class="tiny dim" style="margin-bottom:6px">Measurement type</div>
+      ${nxTypeSeg()}
+      <div class="tiny dim" style="margin:14px 0 4px">Default unit</div>
+      <div class="btn" style="width:100%;text-align:center;opacity:.6">lb (fixed)</div>
+      <button class="btn primary big" style="margin-top:16px" data-act="nx-wnext">NEXT</button>`;
+  } else {
+    body = `<div class="tiny dim" style="margin-bottom:4px">Machine brand <span style="text-transform:none">(optional)</span></div>
+      <input class="pk-search" value="${escapeAttr(nx.brand)}" placeholder="e.g. Technogym" oninput="nx.brand=this.value">
+      <div class="tiny dim" style="margin:12px 0 4px">Notes <span style="text-transform:none">(optional)</span></div>
+      <textarea class="nx-notes" oninput="nx.notes=this.value">${escapeHtml(nx.notes)}</textarea>
+      <button class="btn primary big" style="margin-top:16px" data-act="nx-create">CREATE EXERCISE</button>`;
+  }
+  return `<div class="hdr"><div class="row"><button class="btn tiny" data-act="nx-wback">‹</button>
+      <b style="margin-left:8px">New exercise · ${steps[nx.step-1]}</b></div>
+      <div class="row" style="gap:4px;margin-top:8px">${dots}</div></div>
+    <div class="scroll" style="padding:14px">${body}</div>
+    <div class="ad">Ad · 320×50</div>`;
+}
+
+/* ============================ SCREEN REGISTRY ============================ */
+const SCREENS = {
+  index:  [IDX1, IDX2, IDX3],
+  picker: [PK1, PK2, PK3],
+  entry:  [EN1, EN2, EN3],
+  new:    [NX1, NX2, NX3],
+};
+const SCREEN_TITLE = { index:'Session index', picker:'Exercise picker', entry:'Entry screen', new:'New exercise form' };
+const SCREEN_META = {
+  index: {
+    names: ['Chronological ledger','Stats + card grid','Hero + accordion'],
+    bets: [
+      {bet:'Every superset and its logged sets in one familiar top-to-bottom scroll, in the order performed — the FitNotes ledger.', tradeoff:'Grows long fast; finding an early exercise means scrolling past everything logged after it.'},
+      {bet:'Session stats (elapsed, sets, volume) up top, one tappable card per exercise for instant jump-in.', tradeoff:'Cards flatten each superset to its latest set — the round-by-round ledger is gone unless you open the exercise.'},
+      {bet:'The app names ONE next action and makes it huge; every other superset collapses into a one-line accordion.', tradeoff:'Reviewing or correcting anything else costs an extra tap to expand, and "next" is a guess once a superset could take more rounds.'},
+    ],
+  },
+  picker: {
+    names: ['Two-level category tree','Search-first + recents','Flat A-Z list + index rail'],
+    bets: [
+      {bet:'Browse by body part without knowing an exact name — tap a category, then the exercise.', tradeoff:'Costs two taps minimum even when you already know exactly what you want.'},
+      {bet:'Search box front and centre with recent exercises one tap away — fastest for the common case of repeating what you did last time.', tradeoff:'Browsing an unfamiliar category is demoted below the fold, behind chips.'},
+      {bet:'One flat alphabetical list with a fast-scroll A-Z rail, like iOS Contacts — quickest when you know the name.', tradeoff:'No muscle-group grouping at all; discovering "what else trains Back" is not supported.'},
+    ],
+  },
+  entry: {
+    names: ['Big +/- steppers','Inline numeric keypad','Confirm last time first'],
+    bets: [
+      {bet:'No typing: big thumb-sized +/- buttons in 5 lb / 1 rep steps, hard to fat-finger mid-set. Also the only variant with a rest timer — a small count-up-from-last-set readout in the header, zero-config since it has no target to configure.', tradeoff:'A big jump from the prefill (say +30 lb) takes many taps.'},
+      {bet:'Tap a number, type the exact value on an inline keypad — fastest for a real jump or precise number.', tradeoff:'More motor and reading load than a stepper; a mistyped digit means retyping the whole value.'},
+      {bet:"Most sets repeat last time, so the primary action is a single 'log it' confirm of the prefill; adjustment is tucked behind a disclosure.", tradeoff:'On a progression week, when the numbers actually change, you pay an extra tap to reveal the adjusters.'},
+    ],
+  },
+  new: {
+    names: ['Full single-column form','Progressive disclosure','Step-by-step wizard'],
+    bets: [
+      {bet:'Every field visible at once — name, category, type, unit, brand, notes — nothing hidden, familiar settings-form shape.', tradeoff:'Long scroll on the SE 3; feels heavy for something you are doing mid-session, in a hurry.'},
+      {bet:'Only name + category up front with sensible defaults (weight & reps, lb); everything else is behind one "More details" toggle.', tradeoff:'Measurement type is not surfaced by default — easy to forget to mark a bodyweight exercise as such.'},
+      {bet:'One field group per screen with a progress dial — guided and hard to mess up for someone unsure what a field means.', tradeoff:'The most taps and screens of the three, for what is meant to be a quick mid-session detour.'},
+    ],
+  },
+};
+
+/* ============================ ACTIONS ============================ */
+function act(a, el){
+  const d = +(el.dataset.d||0);
+  switch(a){
+    /* ---- index ---- */
+    case 'idx-open': {
+      const ssIdx=+el.dataset.ss;
+      const exId=el.dataset.ex || nextTarget(ssIdx).ex;
+      startEntry(ssIdx, exId);
+      break; }
+    case 'idx-add': goPicker(); break;
+    case 'idx-toggle': ix.expanded[el.dataset.ss] = !ix.expanded[el.dataset.ss]; break;
+
+    /* ---- picker ---- */
+    case 'pk-back': goIndex(); break;
+    case 'pk-cat': pk.cat=el.dataset.cat; break;
+    case 'pk-catback': pk.cat=null; break;
+    case 'pk-catchip': pk.chip=el.dataset.cat; break;
+    case 'pk-pick': pickExercise(el.dataset.ex); break;
+    case 'pk-new': goNewExerciseForm(); break;
+    case 'pk-rail': pk.jumpTo=el.dataset.letter; break;
+
+    /* ---- entry (shared across variants) ---- */
+    case 'en-back': goIndex(); break;
+    case 'en-w': { const e=EX[en.exId]; en.w = e.type==='bodyweight' ? en.w+d*INCR : Math.max(0, en.w+d*INCR); break; }
+    case 'en-r': en.r=Math.max(1, en.r+d); break;
+    case 'en-half': en.half=!en.half; break;
+    case 'en-drop': addDropStep(); break;
+    case 'en-save': saveSet(); break;
+
+    /* ---- entry variant 2: keypad ---- */
+    case 'en2-open': en.keypadTarget=el.dataset.f; en.keypadBuf=''; break;
+    case 'en2-digit': if(en.keypadBuf.replace('-','').length<4) en.keypadBuf+=el.dataset.n; break;
+    case 'en2-bksp': en.keypadBuf=en.keypadBuf.slice(0,-1); break;
+    case 'en2-sign': en.keypadBuf = en.keypadBuf.startsWith('-') ? en.keypadBuf.slice(1) : '-'+en.keypadBuf; break;
+    case 'en2-done': {
+      if(en.keypadBuf!=='' && en.keypadBuf!=='-'){
+        const v=parseInt(en.keypadBuf,10);
+        if(en.keypadTarget==='w') en.w = EX[en.exId].type==='bodyweight' ? v : Math.max(0,v);
+        else en.r = Math.max(1,v);
+      }
+      en.keypadTarget=null; en.keypadBuf=''; break; }
+    case 'en2-cancel': en.keypadTarget=null; en.keypadBuf=''; break;
+
+    /* ---- entry variant 3: confirm-first ---- */
+    case 'en3-adjust': en.adjustOpen=!en.adjustOpen; break;
+
+    /* ---- new exercise ---- */
+    case 'nx-back': goPicker(); break;
+    case 'nx-wback': if(nx.step>1) nx.step--; else goPicker(); break;
+    case 'nx-cat': nx.cat=el.dataset.cat; if(screen==='new' && V.new===3) nx.step=Math.min(4, nx.step+1); break;
+    case 'nx-type': nx.type=el.dataset.t; break;
+    case 'nx-more': nx.moreOpen=!nx.moreOpen; break;
+    case 'nx-wnext': nx.step=Math.min(4, nx.step+1); break;
+    case 'nx-create': createExercise(); break;
+  }
+}
+
+/* ============================ HUD / STATE DUMP ============================ */
+const TASK = 'Mix and match screens with the switcher pill (or ←/→). Try: cold open → picker → log a Barbell Row set → create a brand-new exercise mid-session → log its first set → back to Today.';
+function stateDump(){
+  const lines=[`screen: ${SCREEN_TITLE[screen]} (variant ${V[screen]} of 3)`, ''];
+  S.supersets.forEach((ss,i)=>{
+    lines.push(`Superset ${i+1}  [${ss.lineup.map(x=>EX[x].name).join(' + ')}]`);
+    if(!ss.rounds.length) lines.push('  (no rounds yet)');
+    ss.rounds.forEach((rd,ri)=>{
+      lines.push(`  Round ${ri+1}`);
+      rd.sets.forEach(st=>{
+        lines.push(`    Set  ${EX[st.ex].name}${isPR(st)?'  ★PR':''}`);
+        st.steps.forEach((s,si)=>lines.push(`      Step ${si+1}  ${stepStr(st.ex,s)}  ratio ${s.ratio}`));
+      });
+    });
+  });
+  if(screen==='entry' && en.exId){
+    lines.push('');
+    lines.push(`composing: ${EX[en.exId].name} — ${stepStr(en.exId,{w:en.w,r:en.r,ratio:en.half?0.5:1})}${en.steps.length?' (plus '+en.steps.length+' drop step(s) pending)':''}`);
+  }
+  return lines.join('\n');
+}
+function render(){
+  document.getElementById('screen').innerHTML = SCREENS[screen][V[screen]-1]();
+  document.getElementById('taps').textContent = taps+keystrokes;
+  document.getElementById('tapsbreak').textContent = `${taps} taps + ${keystrokes} keystrokes`;
+  document.getElementById('state').textContent = stateDump();
+  document.getElementById('taskline').innerHTML = TASK;
+  document.getElementById('sbmid').textContent = 'PROTOTYPE';
+  const meta = SCREEN_META[screen];
+  document.getElementById('vlabel').textContent = `${SCREEN_TITLE[screen]} — ${V[screen]} of 3: ${meta.names[V[screen]-1]}`;
+  document.getElementById('notes').innerHTML = meta.bets.map((b,i)=>
+    `<li><b>${i+1}. ${meta.names[i]}${i+1===V[screen]?' (current)':''}</b><br>bets: ${b.bet}<br><span class="dim">tradeoff: ${b.tradeoff}</span></li>`).join('');
+  document.getElementById('verdict').textContent = `${sessionStats().sets} set(s) logged this session.`;
+  if(pk.jumpTo){
+    const t=document.getElementById('L-'+pk.jumpTo);
+    if(t) t.scrollIntoView({block:'start'});
+    pk.jumpTo=null;
+  }
+}
+
+/* ============================ WIRING ============================ */
+document.querySelector('.phone').addEventListener('click', e=>{
+  const el=e.target.closest('[data-act]'); if(!el) return;
+  taps++; act(el.dataset.act, el); render();
+});
+document.addEventListener('click', e=>{
+  const n=e.target.closest('[data-nav]'); if(n){ cycle(+n.dataset.nav); return; }
+  if(e.target.closest('[data-reset]')) coldOpen();
+});
+document.addEventListener('keydown', e=>{
+  if(/INPUT|TEXTAREA/.test(e.target.tagName) || e.target.isContentEditable) return;
+  if(e.key==='ArrowLeft') cycle(-1);
+  if(e.key==='ArrowRight') cycle(1);
+});
+function cycle(d){
+  V[screen] = ((V[screen]-1+d+3)%3)+1;
+  writeVariantsToURL();
+  render();
+}
+function readVariantsFromURL(){
+  const u=new URL(location);
+  const v={};
+  ['index','picker','entry','new'].forEach(k=>{
+    let n=parseInt(u.searchParams.get(k),10);
+    if(!(n>=1 && n<=3)) n=1;
+    v[k]=n;
+  });
+  return v;
+}
+function writeVariantsToURL(){
+  const u=new URL(location);
+  Object.keys(V).forEach(k=>u.searchParams.set(k, V[k]));
+  history.replaceState({}, '', u);
+}
+
+V = readVariantsFromURL();
+coldOpen();
+writeVariantsToURL();
+
+/* Rest timer ticks the #enRest element directly, once a second, WITHOUT calling
+   render() — a full render() would rebuild innerHTML and fight the picker search
+   box's focus/caret restoration. The element only exists while entry variant 1
+   (EN1) is on screen; on any other screen or variant this is a no-op. */
+setInterval(()=>{
+  const el = document.getElementById('enRest');
+  if(el) el.textContent = restLabel();
+}, 1000);
+</script>
+</body>
+</html>

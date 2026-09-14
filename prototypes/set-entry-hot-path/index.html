@@ -1,0 +1,681 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PROTOTYPE — Set-entry hot path</title>
+<!--
+  THROWAWAY PROTOTYPE. Not app code. Issue #10 "Set-entry hot path".
+
+  Three variants of the set-entry hot path, switchable via ?variant=A|B|C and the
+  floating bottom bar. Frame is 375x667 (iPhone SE 3) deliberately: #13 named the
+  SE 3 as the weakest device in the user base, where a dense entry screen breaks first.
+
+  Task each variant is measured on, shown in the HUD:
+    cold open -> a second set of Lat Pulldown (already in the library, already in
+    today's session) is logged. Tap counter counts every touch inside the frame.
+-->
+<style>
+  :root{
+    --bg:#0d0f12; --panel:#15181d; --panel2:#1c2027; --line:#272c34;
+    --ink:#eef1f5; --dim:#8b95a3; --accent:#4ea3ff; --good:#3ddc84; --warn:#ffb020; --pr:#ffd23f;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:#07080a;color:var(--ink);
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex;gap:28px;align-items:flex-start;justify-content:center;
+    padding:28px 20px 110px;flex-wrap:wrap}
+  h1,h2,h3,h4{margin:0}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+
+  /* ---- phone frame ---- */
+  .phone{width:375px;height:667px;background:var(--bg);border-radius:26px;
+    border:1px solid #2b3039;overflow:hidden;position:relative;display:flex;flex-direction:column;
+    box-shadow:0 24px 60px rgba(0,0,0,.6)}
+  .statusbar{height:22px;flex:none;display:flex;align-items:center;justify-content:space-between;
+    padding:0 14px;font-size:11px;color:var(--dim);background:#0a0c0f}
+  .screen{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+  .scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+  .ad{flex:none;height:50px;background:#22262d;border-top:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;color:#5d6672;font-size:11px;
+    letter-spacing:.08em;text-transform:uppercase}
+
+  /* ---- shared atoms ---- */
+  .row{display:flex;align-items:center;gap:8px}
+  .sp{flex:1}
+  .dim{color:var(--dim)}
+  .tiny{font-size:11px}
+  .hdr{flex:none;padding:10px 14px;border-bottom:1px solid var(--line);background:#111419}
+  .num{font-variant-numeric:tabular-nums;font-family:var(--mono)}
+  .pill{display:inline-block;padding:2px 7px;border-radius:99px;font-size:10px;font-weight:700;
+    letter-spacing:.04em}
+  .pill.pr{background:var(--pr);color:#3a2f00}
+  .pill.half{background:#3a3146;color:#cbb3ff}
+  .pill.drop{background:#3a2a2a;color:#ffb3b3}
+  .pill.bw{background:#17323f;color:#8fd4f5}
+  .btn{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:10px 12px;font-weight:600}
+  .btn.primary{background:var(--accent);color:#06213d;border-color:transparent}
+  .btn.big{padding:16px;font-size:17px;border-radius:14px;width:100%;text-align:center}
+
+  /* ---- HUD ---- */
+  .hud{width:330px;font-size:12px}
+  .hud h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);
+    margin-bottom:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;
+    margin-bottom:12px}
+  .taps{font-family:var(--mono);font-size:34px;font-weight:700}
+  .task{color:var(--warn);font-size:12px;line-height:1.5}
+  pre{margin:0;font-family:var(--mono);font-size:11px;line-height:1.45;color:#b9c2cf;
+    white-space:pre-wrap;max-height:260px;overflow:auto}
+  .hud .btn{padding:7px 10px;font-size:12px}
+  .qs li{margin-bottom:6px;color:#c3ccd8}
+  .qs{padding-left:16px;margin:0}
+
+  /* ---- switcher ---- */
+  .switcher{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:99;
+    display:flex;align-items:center;gap:4px;background:#fff;color:#111;border-radius:99px;
+    padding:6px;box-shadow:0 10px 30px rgba(0,0,0,.5);font-weight:700}
+  .switcher button{padding:6px 12px;border-radius:99px;font-size:18px;line-height:1}
+  .switcher button:hover{background:#eceff3}
+  .switcher .lbl{padding:0 12px;font-size:13px;white-space:nowrap}
+
+  /* =================== VARIANT A =================== */
+  .a-sessrow{padding:12px 14px;border-bottom:1px solid var(--line)}
+  .a-setline{display:flex;gap:8px;padding:3px 0;font-size:13px}
+  .a-cat{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px}
+  .a-cattile{background:var(--panel2);border-radius:12px;padding:18px 12px;font-weight:700;
+    border-left:4px solid var(--accent)}
+  .a-exrow{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px}
+  .a-stepper{display:flex;align-items:center;justify-content:space-between;gap:8px;
+    background:var(--panel2);border-radius:14px;padding:8px;margin-bottom:10px}
+  .a-stepper .v{font-family:var(--mono);font-size:30px;font-weight:700;min-width:92px;
+    text-align:center}
+  .a-stepper .pm{width:52px;height:52px;border-radius:12px;background:#2a3038;font-size:24px;
+    display:flex;align-items:center;justify-content:center}
+  .a-search{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:10px;color:var(--ink);font:inherit}
+
+  /* =================== VARIANT B =================== */
+  .b-card{margin:10px;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    overflow:hidden}
+  .b-lineup{display:flex;gap:6px;padding:9px 10px;border-bottom:1px solid var(--line);
+    background:#12161b;flex-wrap:wrap}
+  .b-chip{padding:4px 8px;background:#242a33;border-radius:8px;font-size:11px;font-weight:600}
+  .b-grid{width:100%;border-collapse:collapse;font-size:13px}
+  .b-grid th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);
+    font-weight:600;padding:6px 8px;text-align:left;border-bottom:1px solid var(--line)}
+  .b-grid td{padding:7px 8px;border-bottom:1px solid #1e232a;font-family:var(--mono)}
+  .b-grid tr:last-child td{border-bottom:0}
+  .b-cell.next{background:#13293f;outline:1px solid var(--accent);border-radius:6px;
+    color:var(--accent);font-weight:700}
+  .b-pad{flex:none;background:#10141a;border-top:1px solid var(--accent)}
+  .b-padhdr{display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:12px;
+    border-bottom:1px solid var(--line)}
+  .b-fields{display:flex;gap:8px;padding:9px 10px;align-items:stretch}
+  .b-field{flex:1;background:var(--panel2);border-radius:11px;padding:5px 6px;text-align:center}
+  .b-field .k{font-size:9px;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+  .b-field .v{font-family:var(--mono);font-size:25px;font-weight:700;line-height:1.1}
+  .b-field .pm{display:flex;gap:5px;margin-top:3px}
+  .b-field .pm button{flex:1;background:#2a3038;border-radius:7px;padding:5px 0;font-size:15px}
+  .b-log{width:74px;border-radius:11px;background:var(--accent);color:#06213d;font-size:26px;
+    font-weight:800;display:flex;align-items:center;justify-content:center}
+  .b-mods{display:flex;gap:6px;padding:0 10px 9px}
+  .b-mods button{flex:1;background:#232830;border-radius:9px;padding:8px 0;font-size:12px;
+    font-weight:600}
+  .b-mods button.on{background:#3a3146;color:#cbb3ff}
+
+  /* =================== VARIANT C =================== */
+  .c-wrap{flex:1;display:flex;flex-direction:column;padding:14px;min-height:0}
+  .c-kicker{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  .c-ex{font-size:30px;font-weight:800;line-height:1.06;margin:5px 0 2px}
+  .c-nums{display:flex;align-items:center;gap:10px;margin:16px 0 6px}
+  .c-nums .n{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:12px 6px;text-align:center}
+  .c-nums .n .v{font-family:var(--mono);font-size:40px;font-weight:800;line-height:1}
+  .c-nums .n .k{font-size:10px;letter-spacing:.1em;color:var(--dim);text-transform:uppercase;
+    margin-top:3px}
+  .c-x{font-size:22px;color:var(--dim)}
+  .c-mods{display:flex;gap:8px;margin-bottom:10px}
+  .c-mods button{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    padding:10px 0;font-size:12px;font-weight:600}
+  .c-mods button.on{background:#3a3146;color:#cbb3ff;border-color:#4b3f5e}
+  .c-timer{font-family:var(--mono);font-size:62px;font-weight:800;text-align:center;margin:6px 0}
+  .c-sheet{position:absolute;inset:0;background:rgba(5,6,8,.96);z-index:5;display:flex;
+    flex-direction:column}
+  .c-steps{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:9px 11px;
+    margin-bottom:10px;font-family:var(--mono);font-size:13px}
+</style>
+</head>
+<body>
+
+<div class="phone"><div class="statusbar"><span>9:41</span><span id="sbmid"></span><span>100%</span></div><div class="screen" id="screen"></div></div>
+
+<div class="hud">
+  <div class="card">
+    <h2>Task</h2>
+    <div class="task" id="taskline"></div>
+    <div class="row" style="margin-top:10px">
+      <div><div class="taps" id="taps">0</div><div class="tiny dim">taps since cold open</div></div>
+      <div class="sp"></div>
+      <button class="btn" data-reset>Cold open ⟲</button>
+    </div>
+    <div class="tiny" id="verdict" style="margin-top:8px;color:var(--good)"></div>
+  </div>
+  <div class="card">
+    <h2>Session state</h2>
+    <pre id="state"></pre>
+  </div>
+  <div class="card">
+    <h2>What this variant answers</h2>
+    <ul class="qs tiny" id="notes"></ul>
+  </div>
+</div>
+
+<div class="switcher">
+  <button data-nav="-1">‹</button><span class="lbl" id="vlabel"></span><button data-nav="1">›</button>
+</div>
+
+<script>
+/* ============================ DATA ============================ */
+const CATS = ['Back','Chest','Shoulders','Legs','Arms','Core'];
+const EXS = [
+  ['lat-pulldown','Lat Pulldown','Back','weight','Technogym'],
+  ['barbell-row','Barbell Row','Back','weight',''],
+  ['seated-row','Seated Cable Row','Back','weight','Life Fitness'],
+  ['face-pull','Face Pull','Back','weight',''],
+  ['pull-up','Pull Up','Back','bodyweight',''],
+  ['chin-up','Chin Up','Back','bodyweight',''],
+  ['deadlift','Deadlift','Back','weight',''],
+  ['t-bar-row','T-Bar Row','Back','weight',''],
+  ['bench-press','Bench Press','Chest','weight',''],
+  ['incline-db-press','Incline DB Press','Chest','weight',''],
+  ['cable-fly','Cable Fly','Chest','weight','Technogym'],
+  ['dip','Dip','Chest','bodyweight',''],
+  ['push-up','Push Up','Chest','bodyweight',''],
+  ['ohp','Overhead Press','Shoulders','weight',''],
+  ['lateral-raise','Lateral Raise','Shoulders','weight',''],
+  ['rear-delt-fly','Rear Delt Fly','Shoulders','weight',''],
+  ['squat','Back Squat','Legs','weight',''],
+  ['leg-press','Leg Press','Legs','weight','Hammer'],
+  ['rdl','Romanian Deadlift','Legs','weight',''],
+  ['leg-curl','Leg Curl','Legs','weight',''],
+  ['leg-extension','Leg Extension','Legs','weight',''],
+  ['calf-raise','Standing Calf Raise','Legs','weight',''],
+  ['bb-curl','Barbell Curl','Arms','weight',''],
+  ['hammer-curl','Hammer Curl','Arms','weight',''],
+  ['tricep-pushdown','Tricep Pushdown','Arms','weight',''],
+  ['skullcrusher','Skullcrusher','Arms','weight',''],
+  ['cable-crunch','Cable Crunch','Core','weight',''],
+  ['hanging-leg-raise','Hanging Leg Raise','Core','bodyweight',''],
+  ['plank','Plank','Core','bodyweight',''],
+].map(([id,name,cat,type,brand])=>({id,name,cat,type,brand,unit:'kg'}));
+const EX = Object.fromEntries(EXS.map(e=>[e.id,e]));
+
+/* last time each exercise was trained: seeds the prefill and "previous" line */
+const HIST = {
+  'lat-pulldown':{w:60,r:10,days:4,prVol:640},
+  'barbell-row' :{w:70,r:8, days:4,prVol:600},
+  'face-pull'   :{w:25,r:15,days:4,prVol:400},
+  'pull-up'     :{w:0, r:9, days:4,prReps:10},
+  'cable-crunch':{w:45,r:12,days:11,prVol:560},
+};
+const INCR = 2.5; // kg — global increment, 5 lb / 2.5 kg
+
+/* ============================ STATE ============================ */
+let S, taps, variant, screen, ui;
+
+function coldOpen(){
+  taps = 0;
+  S = {
+    agenda:'Back, Core',
+    startedAt:'18:04',
+    supersets:[
+      { lineup:['lat-pulldown'],
+        rounds:[{sets:[{ex:'lat-pulldown',steps:[{w:60,r:10,ratio:1,u:'kg'}]}]}] },
+      { lineup:['barbell-row','face-pull'], rounds:[] },
+    ],
+  };
+  ui = {
+    // A
+    aScreen:'home', aCat:null, aSearch:'', aEx:null, aW:null, aR:null, aHalf:false,
+    // B
+    bSS:0, bW:null, bR:null, bHalf:false, bPad:true,
+    // C
+    cScreen:'now', cW:null, cR:null, cHalf:false, cRest:90,
+    logged:false, taskDoneAt:null,
+  };
+  // aim B and C at the next set the app expects, prefilled — this is the claim both make
+  const t = nextTarget(0), p = prefillFor(t.ex);
+  ui.bW = p.w; ui.bR = p.r; ui.cW = p.w; ui.cR = p.r;
+  render();
+}
+
+function prefillFor(exId){
+  // last step of this exercise in today's session, else last session, else blank
+  for(let i=S.supersets.length-1;i>=0;i--){
+    const ss=S.supersets[i];
+    for(let r=ss.rounds.length-1;r>=0;r--)
+      for(const st of ss.rounds[r].sets)
+        if(st.ex===exId) return {w:st.steps[0].w, r:st.steps[0].r, src:'this session'};
+  }
+  const h=HIST[exId];
+  if(h) return {w:h.w, r:h.r, src:h.days+'d ago'};
+  return {w:20, r:10, src:'never trained'};
+}
+function prevLine(exId){
+  const h=HIST[exId]; if(!h) return 'No previous — new exercise';
+  return `Previous: ${h.w===0?'bodyweight':h.w+' kg'} × ${h.r}  ·  ${h.days}d ago`;
+}
+function volume(set){ return set.steps.reduce((a,s)=>a+s.w*s.r*s.ratio,0); }
+function isPR(set){
+  const e=EX[set.ex], h=HIST[set.ex]; if(!h) return false;
+  return e.type==='bodyweight'
+    ? set.steps.reduce((a,s)=>a+s.r,0) > (h.prReps??0)
+    : volume(set) > (h.prVol??0);
+}
+function setLabel(set){
+  return set.steps.map(s=>{
+    const w = EX[set.ex].type==='bodyweight' ? (s.w===0?'BW':'BW+'+s.w) : s.w;
+    return `${w} × ${s.r}${s.ratio<1?' ½':''}`;
+  }).join('  ▸ ');
+}
+function logSet(ssIdx, exId, w, r, half){
+  const ss=S.supersets[ssIdx];
+  let round=ss.rounds[ss.rounds.length-1];
+  if(!round || round.sets.length>=ss.lineup.length){ round={sets:[]}; ss.rounds.push(round); }
+  round.sets.push({ex:exId,steps:[{w,r,ratio:half?0.5:1,u:'kg'}]});
+  ui.logged=true;
+  if(exId==='lat-pulldown' && ui.taskDoneAt===null) ui.taskDoneAt=taps;
+}
+function addDrop(ssIdx){
+  const ss=S.supersets[ssIdx]; const round=ss.rounds[ss.rounds.length-1];
+  if(!round||!round.sets.length) return;
+  const set=round.sets[round.sets.length-1]; const last=set.steps[set.steps.length-1];
+  set.steps.push({w:Math.max(0,last.w-INCR*4), r:Math.max(1,last.r-4), ratio:1, u:'kg'});
+}
+/* next exercise the app expects, given a superset's line-up and rounds */
+function nextTarget(ssIdx){
+  const ss=S.supersets[ssIdx];
+  const last=ss.rounds[ss.rounds.length-1];
+  if(!last || last.sets.length>=ss.lineup.length)
+    return {round:ss.rounds.length, i:0, ex:ss.lineup[0]};
+  return {round:ss.rounds.length-1, i:last.sets.length, ex:ss.lineup[last.sets.length]};
+}
+
+/* ============================ VARIANT A ============================ */
+/* Screen-per-exercise. The FitNotes shape: a session index, a category tree,
+   and a dedicated entry screen per exercise with a big stepper pad. */
+const A = {
+  name:'Screen per exercise',
+  notes:[
+    'Familiar: this is the shape FitNotes users already have in their hands.',
+    'Entry screen is roomy — drop sets, half reps and history all fit without crowding.',
+    'Costs a screen transition per exercise, and the session index is a second place to look.',
+    'Ad sits under the save pad — always visible, never over a control.',
+  ],
+  render(){
+    if(ui.aScreen==='home') return A.home();
+    if(ui.aScreen==='cat') return A.cat();
+    if(ui.aScreen==='list') return A.list();
+    return A.entry();
+  },
+  home(){
+    let body='';
+    S.supersets.forEach((ss,i)=>{
+      const names=ss.lineup.map(x=>EX[x].name).join('  +  ');
+      let sets='';
+      ss.rounds.forEach(rd=>rd.sets.forEach(st=>{
+        sets+=`<div class="a-setline"><span class="dim num" style="width:74px">${EX[st.ex].name.split(' ')[0]}</span>
+          <span class="num">${setLabel(st)}</span>${isPR(st)?'<span class="pill pr">PR</span>':''}</div>`;
+      }));
+      if(!sets) sets='<div class="tiny dim" style="padding:3px 0">No sets yet — tap to start</div>';
+      body+=`<div class="a-sessrow" data-act="a-open" data-ss="${i}">
+        <div class="row"><b>${names}</b><div class="sp"></div>
+        ${ss.lineup.length>1?'<span class="pill" style="background:#243043;color:#8fb8e8">SUPERSET</span>':''}</div>
+        <div style="margin-top:5px">${sets}</div></div>`;
+    });
+    return `
+    <div class="hdr"><div class="row"><div>
+        <b>Today</b> <span class="dim tiny">· 12 Sep · 18:04 · 41 min</span>
+        <div class="tiny" style="color:var(--accent)">Back, Core</div>
+      </div><div class="sp"></div><button class="btn tiny" data-act="noop">⋯</button></div></div>
+    <div class="scroll">${body}
+      <div style="padding:14px"><button class="btn big" data-act="a-add">+ ADD EXERCISE</button></div>
+    </div>
+    <div class="ad">Ad · 320×50</div>`;
+  },
+  cat(){
+    return `
+    <div class="hdr"><div class="row"><button class="btn tiny" data-act="a-back">‹</button>
+      <b>Choose exercise</b></div></div>
+    <div class="scroll">
+      <div style="padding:14px 14px 0"><input class="a-search" placeholder="Search all exercises…" data-act="a-search" readonly></div>
+      <div class="a-cat">${CATS.map(c=>`<div class="a-cattile" data-act="a-cat" data-cat="${c}">${c}
+        <div class="tiny dim" style="font-weight:400">${EXS.filter(e=>e.cat===c).length} exercises</div></div>`).join('')}</div>
+      <div style="padding:0 14px 14px"><button class="btn big" data-act="a-new">+ NEW EXERCISE</button></div>
+    </div>
+    <div class="ad">Ad · 320×50</div>`;
+  },
+  list(){
+    const list=EXS.filter(e=>e.cat===ui.aCat);
+    return `
+    <div class="hdr"><div class="row"><button class="btn tiny" data-act="a-back">‹</button>
+      <b>${ui.aCat}</b></div></div>
+    <div class="scroll">${list.map(e=>`<div class="a-exrow" data-act="a-pick" data-ex="${e.id}">
+      <span>${e.name}</span>${e.type==='bodyweight'?'<span class="pill bw">BW</span>':''}
+      <div class="sp"></div><span class="tiny dim">${HIST[e.id]?HIST[e.id].w+'×'+HIST[e.id].r:'—'}</span></div>`).join('')}
+      <div style="padding:14px"><button class="btn big" data-act="a-new">+ NEW EXERCISE</button></div>
+    </div>
+    <div class="ad">Ad · 320×50</div>`;
+  },
+  entry(){
+    const e=EX[ui.aEx];
+    const ssIdx=S.supersets.findIndex(s=>s.lineup.includes(ui.aEx));
+    let today='';
+    if(ssIdx>=0) S.supersets[ssIdx].rounds.forEach((rd,ri)=>rd.sets.forEach(st=>{
+      if(st.ex!==ui.aEx) return;
+      today+=`<div class="a-setline"><span class="dim" style="width:26px">${ri+1}</span>
+        <span class="num">${setLabel(st)}</span>
+        ${st.steps.length>1?'<span class="pill drop">DROP</span>':''}
+        ${isPR(st)?'<span class="pill pr">PR</span>':''}</div>`;
+    }));
+    return `
+    <div class="hdr"><div class="row"><button class="btn tiny" data-act="a-back">‹</button>
+      <div><b>${e.name}</b><div class="tiny dim">${e.cat}${e.brand?' · '+e.brand:''}</div></div></div></div>
+    <div class="scroll" style="padding:12px">
+      <div class="a-stepper"><button class="pm" data-act="a-w" data-d="-1">−</button>
+        <div><div class="v num">${ui.aW}</div><div class="tiny dim" style="text-align:center">
+        ${e.type==='bodyweight'?'kg added':'kg'}</div></div>
+        <button class="pm" data-act="a-w" data-d="1">+</button></div>
+      <div class="a-stepper"><button class="pm" data-act="a-r" data-d="-1">−</button>
+        <div><div class="v num">${ui.aR}</div><div class="tiny dim" style="text-align:center">reps</div></div>
+        <button class="pm" data-act="a-r" data-d="1">+</button></div>
+      <div class="row" style="gap:8px;margin-bottom:10px">
+        <button class="btn ${ui.aHalf?'':''}" style="flex:1;${ui.aHalf?'background:#3a3146;color:#cbb3ff':''}" data-act="a-half">½ half reps</button>
+        <button class="btn" style="flex:1" data-act="a-drop">+ drop set</button></div>
+      <button class="btn primary big" data-act="a-save">SAVE SET</button>
+      <div class="tiny dim" style="margin:12px 0 6px">${prevLine(ui.aEx)}</div>
+      ${today?`<div class="tiny dim" style="margin-bottom:3px">TODAY</div>${today}`:''}
+    </div>
+    <div class="ad">Ad · 320×50</div>`;
+  },
+};
+
+/* ============================ VARIANT B ============================ */
+/* One scrolling session sheet + a permanently docked keypad. No navigation:
+   the keypad is always aimed at the next set the app expects. */
+const B = {
+  name:'Sheet + docked keypad',
+  notes:[
+    'Zero navigation: cold open lands on the session with the next set already aimed and prefilled.',
+    'Superset rotation is free — the grid is rounds × line-up, and the keypad walks it.',
+    'Densest of the three; this is the one that has to survive the SE 3 screen.',
+    'The keypad occupies the ad slot while you are entering, so the ad only shows at rest.',
+  ],
+  render(){
+    const t=nextTarget(ui.bSS);
+    const cards=S.supersets.map((ss,i)=>{
+      const active=i===ui.bSS;
+      const cols=ss.lineup.map(x=>`<th>${EX[x].name}</th>`).join('');
+      const nRounds=Math.max(ss.rounds.length, active?t.round+1:ss.rounds.length);
+      let rows='';
+      for(let r=0;r<nRounds;r++){
+        const rd=ss.rounds[r];
+        let tds='';
+        ss.lineup.forEach((exId,ci)=>{
+          const st=rd&&rd.sets[ci];
+          const isNext=active && r===t.round && ci===t.i;
+          if(st) tds+=`<td><span class="b-cell">${setLabel(st)}</span>
+            ${st.steps.length>1?'<span class="pill drop">D</span>':''}
+            ${isPR(st)?'<span class="pill pr">PR</span>':''}</td>`;
+          else tds+=`<td><span class="b-cell ${isNext?'next':''}" data-act="b-aim" data-ss="${i}">
+            ${isNext?ui.bW+' × '+ui.bR:'·'}</span></td>`;
+        });
+        rows+=`<tr><td class="dim" style="width:20px">${r+1}</td>${tds}</tr>`;
+      }
+      return `<div class="b-card" data-act="b-pick" data-ss="${i}" style="${active?'border-color:var(--accent)':''}">
+        <div class="b-lineup">${ss.lineup.map(x=>`<span class="b-chip">${EX[x].name}</span>`).join('')}
+          <div class="sp"></div><button class="b-chip" data-act="noop">+ add to superset</button></div>
+        <table class="b-grid"><tr><th></th>${cols}</tr>${rows}</table></div>`;
+    }).join('');
+
+    const tEx=EX[t.ex];
+    const pad = `
+      <div class="b-pad">
+        <div class="b-padhdr"><b style="color:var(--accent)">${tEx.name}</b>
+          <span class="dim tiny">round ${t.round+1}</span><div class="sp"></div>
+          <span class="dim tiny">${prevLine(t.ex).replace('Previous: ','prev ')}</span></div>
+        <div class="b-fields">
+          <div class="b-field"><div class="k">${tEx.type==='bodyweight'?'kg added':'kg'}</div>
+            <div class="v num">${ui.bW}</div>
+            <div class="pm"><button data-act="b-w" data-d="-1">−</button><button data-act="b-w" data-d="1">+</button></div></div>
+          <div class="b-field"><div class="k">reps</div><div class="v num">${ui.bR}</div>
+            <div class="pm"><button data-act="b-r" data-d="-1">−</button><button data-act="b-r" data-d="1">+</button></div></div>
+          <button class="b-log" data-act="b-log">✓</button>
+        </div>
+        <div class="b-mods">
+          <button class="${ui.bHalf?'on':''}" data-act="b-half">½ half</button>
+          <button data-act="b-drop">+ drop</button>
+          <button data-act="b-hide">▾ hide</button>
+        </div>
+      </div>`;
+
+    return `
+    <div class="hdr"><div class="row"><div><b>Today</b>
+      <span class="dim tiny">· 18:04 · 41 min</span>
+      <div class="tiny" style="color:var(--accent)">Back, Core</div></div>
+      <div class="sp"></div><button class="btn tiny" data-act="a-add">+ exercise</button></div></div>
+    <div class="scroll">${cards}<div style="height:10px"></div></div>
+    ${ui.bPad?pad:'<div class="ad">Ad · 320×50</div>'}`;
+  },
+};
+
+/* ============================ VARIANT C ============================ */
+/* A queue, not a list. The app decides what is next and shows only that.
+   Everything else is behind a sheet. Rest is a first-class state. */
+const C = {
+  name:'Now-card queue',
+  notes:[
+    'One tap from cold open, and the tap target is enormous — usable with a thumb, mid-set, sweaty.',
+    'The app decides what is next; you confirm. Rotation and rest come for free.',
+    'Hides the session: reviewing or correcting anything means opening the sheet.',
+    'Ad only appears on the rest timer — an idle moment, never during entry.',
+  ],
+  render(){
+    if(ui.cScreen==='sheet') return C.sheet();
+    if(ui.cScreen==='rest') return C.rest();
+    const t=nextTarget(ui.bSS); const e=EX[t.ex];
+    const ss=S.supersets[ui.bSS];
+    return `
+    <div class="hdr"><div class="row"><span class="tiny dim">Back, Core · 41 min</span>
+      <div class="sp"></div><button class="btn tiny" data-act="c-sheet">Session ▾</button></div></div>
+    <div class="c-wrap">
+      <div class="c-kicker">Up next · round ${t.round+1}${ss.lineup.length>1?' of superset':''}</div>
+      <div class="c-ex">${e.name}</div>
+      <div class="tiny dim">${prevLine(t.ex)}</div>
+      <div class="c-nums">
+        <div class="n" data-act="c-w"><div class="v num">${ui.cW}</div>
+          <div class="k">${e.type==='bodyweight'?'kg added':'kg'}</div></div>
+        <div class="c-x">×</div>
+        <div class="n" data-act="c-r"><div class="v num">${ui.cR}</div><div class="k">reps</div></div>
+      </div>
+      <div class="tiny dim" style="text-align:center;margin-bottom:12px">tap a number to change · ${INCR} kg steps</div>
+      <div class="sp"></div>
+      <div class="c-mods">
+        <button class="${ui.cHalf?'on':''}" data-act="c-half">½ half reps</button>
+        <button data-act="c-drop">+ drop set</button>
+      </div>
+      <button class="btn primary big" style="padding:22px;font-size:20px" data-act="c-log">LOG SET</button>
+    </div>`;
+  },
+  rest(){
+    const t=nextTarget(ui.bSS);
+    const ss=S.supersets[ui.bSS];
+    const rd=ss.rounds[ss.rounds.length-1];
+    const just=rd&&rd.sets[rd.sets.length-1];
+    return `
+    <div class="hdr"><div class="row"><span class="tiny dim">Back, Core · 41 min</span>
+      <div class="sp"></div><button class="btn tiny" data-act="c-sheet">Session ▾</button></div></div>
+    <div class="c-wrap">
+      <div class="c-kicker" style="text-align:center">Rest</div>
+      <div class="c-timer">1:${String(ui.cRest%60).padStart(2,'0')}</div>
+      ${just?`<div class="c-steps"><span class="dim tiny">LOGGED </span>${EX[just.ex].name} · ${setLabel(just)}
+        ${isPR(just)?'<span class="pill pr">PR</span>':''}</div>`:''}
+      <div class="c-steps"><span class="dim tiny">UP NEXT </span>${EX[t.ex].name}</div>
+      <div class="sp"></div>
+      <button class="btn big" data-act="c-undo">Undo last set</button>
+      <div style="height:8px"></div>
+      <button class="btn primary big" data-act="c-skip">SKIP REST →</button>
+    </div>
+    <div class="ad">Ad · 320×50</div>`;
+  },
+  sheet(){
+    let body='';
+    S.supersets.forEach(ss=>{
+      body+=`<div style="padding:11px 14px;border-bottom:1px solid var(--line)">
+        <b>${ss.lineup.map(x=>EX[x].name).join(' + ')}</b>`;
+      ss.rounds.forEach((rd,ri)=>rd.sets.forEach(st=>{
+        body+=`<div class="a-setline"><span class="dim" style="width:22px">${ri+1}</span>
+          <span class="num">${EX[st.ex].name.split(' ')[0]} ${setLabel(st)}</span>
+          ${isPR(st)?'<span class="pill pr">PR</span>':''}</div>`;}));
+      if(!ss.rounds.length) body+='<div class="tiny dim">not started</div>';
+      body+='</div>';
+    });
+    return `
+    <div class="hdr"><div class="row"><b>Today · Back, Core</b><div class="sp"></div>
+      <button class="btn tiny" data-act="c-close">Close ✕</button></div></div>
+    <div class="scroll">${body}
+      <div style="padding:14px"><button class="btn big" data-act="a-add">+ ADD EXERCISE</button></div></div>
+    <div class="ad">Ad · 320×50</div>`;
+  },
+};
+
+const VARIANTS = {A,B,C};
+
+/* ============================ ACTIONS ============================ */
+function act(a, el){
+  const d = +(el.dataset.d||0);
+  switch(a){
+    /* ---- A ---- */
+    case 'a-add': ui.aScreen='cat'; ui.cScreen='now'; break;
+    case 'a-cat': ui.aCat=el.dataset.cat; ui.aScreen='list'; break;
+    case 'a-pick': {
+      ui.aEx=el.dataset.ex; const p=prefillFor(ui.aEx);
+      ui.aW=p.w; ui.aR=p.r; ui.aHalf=false; ui.aScreen='entry';
+      if(!S.supersets.some(s=>s.lineup.includes(ui.aEx)))
+        S.supersets.push({lineup:[ui.aEx],rounds:[]});
+      break; }
+    case 'a-open': {
+      const ss=S.supersets[+el.dataset.ss]; ui.aEx=nextTarget(+el.dataset.ss).ex;
+      const p=prefillFor(ui.aEx); ui.aW=p.w; ui.aR=p.r; ui.aHalf=false; ui.aScreen='entry'; break; }
+    case 'a-back': ui.aScreen = ui.aScreen==='list'?'cat':'home'; break;
+    case 'a-w': ui.aW=Math.max(0,ui.aW+d*INCR); break;
+    case 'a-r': ui.aR=Math.max(1,ui.aR+d); break;
+    case 'a-half': ui.aHalf=!ui.aHalf; break;
+    case 'a-save': {
+      const i=S.supersets.findIndex(s=>s.lineup.includes(ui.aEx));
+      logSet(i,ui.aEx,ui.aW,ui.aR,ui.aHalf); ui.aHalf=false; break; }
+    case 'a-drop': {
+      const i=S.supersets.findIndex(s=>s.lineup.includes(ui.aEx)); addDrop(i); break; }
+    case 'a-new': alert('PROTOTYPE: inline "new exercise" form — name, category, measurement type.\nThe question this variant is asking: does creating one mid-session cost you your place?'); break;
+    case 'a-search': break;
+
+    /* ---- B ---- */
+    case 'b-pick': case 'b-aim': {
+      ui.bSS=+el.dataset.ss; const t=nextTarget(ui.bSS); const p=prefillFor(t.ex);
+      ui.bW=p.w; ui.bR=p.r; ui.bPad=true; break; }
+    case 'b-w': ui.bW=Math.max(0,ui.bW+d*INCR); break;
+    case 'b-r': ui.bR=Math.max(1,ui.bR+d); break;
+    case 'b-half': ui.bHalf=!ui.bHalf; break;
+    case 'b-drop': addDrop(ui.bSS); break;
+    case 'b-hide': ui.bPad=false; break;
+    case 'b-log': {
+      const t=nextTarget(ui.bSS);
+      logSet(ui.bSS,t.ex,ui.bW,ui.bR,ui.bHalf); ui.bHalf=false;
+      const n=nextTarget(ui.bSS); const p=prefillFor(n.ex); ui.bW=p.w; ui.bR=p.r; break; }
+
+    /* ---- C ---- */
+    case 'c-w': ui.cW=ui.cW+INCR; break;
+    case 'c-r': ui.cR=ui.cR+1; break;
+    case 'c-half': ui.cHalf=!ui.cHalf; break;
+    case 'c-drop': addDrop(ui.bSS); break;
+    case 'c-log': {
+      const t=nextTarget(ui.bSS);
+      logSet(ui.bSS,t.ex,ui.cW,ui.cR,ui.cHalf); ui.cHalf=false; ui.cScreen='rest'; break; }
+    case 'c-skip': {
+      ui.cScreen='now'; const n=nextTarget(ui.bSS); const p=prefillFor(n.ex);
+      ui.cW=p.w; ui.cR=p.r; break; }
+    case 'c-undo': {
+      const ss=S.supersets[ui.bSS]; const rd=ss.rounds[ss.rounds.length-1];
+      if(rd){ rd.sets.pop(); if(!rd.sets.length) ss.rounds.pop(); }
+      ui.cScreen='now'; break; }
+    case 'c-sheet': ui.cScreen='sheet'; break;
+    case 'c-close': ui.cScreen='now'; break;
+  }
+}
+
+/* ============================ WIRING ============================ */
+const TASK = 'Cold open → log a <b>second set of Lat Pulldown</b>, an exercise already in the library and already in today’s session. Count the taps. Then try: a drop set, a half-rep set, and rotating through the Barbell Row + Face Pull superset.';
+
+function latPulldownSets(){
+  let n=0; S.supersets.forEach(ss=>ss.rounds.forEach(rd=>rd.sets.forEach(st=>{
+    if(st.ex==='lat-pulldown') n++; })));
+  return n;
+}
+function stateDump(){
+  const lines=[];
+  S.supersets.forEach((ss,i)=>{
+    lines.push(`superset ${i+1}  [${ss.lineup.map(x=>EX[x].name).join(' + ')}]`);
+    if(!ss.rounds.length) lines.push('  (no rounds)');
+    ss.rounds.forEach((rd,ri)=>{
+      lines.push(`  round ${ri+1}`);
+      rd.sets.forEach(st=>{
+        lines.push(`    set  ${EX[st.ex].name}${isPR(st)?'  ★PR':''}`);
+        st.steps.forEach((s,si)=>lines.push(
+          `      step ${si+1}  ${s.w} ${s.u} x ${s.r}  ratio ${s.ratio}`));
+      });
+    });
+  });
+  return lines.join('\n');
+}
+function render(){
+  const V=VARIANTS[variant];
+  document.getElementById('screen').innerHTML = V.render();
+  document.getElementById('vlabel').textContent = `${variant} — ${V.name}`;
+  document.getElementById('taps').textContent = taps;
+  document.getElementById('state').textContent = stateDump();
+  document.getElementById('taskline').innerHTML = TASK;
+  document.getElementById('sbmid').textContent = 'PROTOTYPE';
+  document.getElementById('notes').innerHTML = V.notes.map(n=>`<li>${n}</li>`).join('');
+  const v=document.getElementById('verdict');
+  v.textContent = ui.taskDoneAt!==null
+    ? `Task done in ${ui.taskDoneAt} tap${ui.taskDoneAt===1?'':'s'} from cold open.` : '';
+}
+document.querySelector('.phone').addEventListener('click',e=>{
+  const el=e.target.closest('[data-act]'); if(!el) return;
+  taps++; act(el.dataset.act, el); render();
+});
+document.addEventListener('click',e=>{
+  const n=e.target.closest('[data-nav]'); if(n){ cycle(+n.dataset.nav); return; }
+  if(e.target.closest('[data-reset]')) coldOpen();
+});
+document.addEventListener('keydown',e=>{
+  if(/INPUT|TEXTAREA/.test(e.target.tagName)||e.target.isContentEditable) return;
+  if(e.key==='ArrowLeft') cycle(-1);
+  if(e.key==='ArrowRight') cycle(1);
+});
+function cycle(d){
+  const ks=Object.keys(VARIANTS); const i=ks.indexOf(variant);
+  setVariant(ks[(i+d+ks.length)%ks.length]);
+}
+function setVariant(k){
+  variant=k;
+  const u=new URL(location); u.searchParams.set('variant',k); history.replaceState({},'',u);
+  coldOpen();
+}
+setVariant((new URL(location)).searchParams.get('variant') || 'A');
+</script>
+</body>
+</html>
