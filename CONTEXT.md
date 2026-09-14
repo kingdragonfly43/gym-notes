@@ -45,15 +45,33 @@ _Avoid_: Workout, training day
 **Agenda**:
 A short, free-text description of what a session or a split day is about, such as
 "Back, Core". It may name several body parts or goals, and it describes rather
-than prescribes: nothing is ever reconciled against it.
+than prescribes: nothing is ever reconciled against it. A session's agenda is a
+**copy** taken when the session is created, never a live view of a split day, so
+editing or replacing a split can never reach backwards and rewrite what a past
+session says it was.
 _Avoid_: Focus, topic, theme, label
 
 **Split**:
-A recurring cycle of a fixed number of days, each day carrying an agenda. It
-exists so a user never has to decide what to train today. A session's agenda
-defaults to the agenda of its day in the split and stays editable; a session is
-never required to match it.
-_Avoid_: Routine, program, plan
+A named, recurring cycle of **training days**, each carrying an agenda. It exists
+so a user never has to decide what to train today. A split holds no dates and no
+rest days: rest is simply the absence of a session, so a cycle of Push, Pull and
+Legs is three days long, not seven. A user may keep several splits; exactly one is
+active at a time, or none. A split prescribes no exercises and no sets, which is
+what keeps it from being a routine.
+_Avoid_: Routine, program, plan, schedule
+
+**Split day**:
+One entry in a split: an agenda and its position in the cycle. It carries nothing
+else — no date, no exercises, no sets.
+_Avoid_: Rotation day, phase, slot
+
+**Active split**:
+The one split currently supplying agendas to new sessions. Exactly one split is
+active, or none, and the others sit inert in the user's list. Making a different
+split active is not a migration: each split's position in its own cycle is read
+from the sessions that used it, so switching away and back resumes where that
+split left off.
+_Avoid_: Current split, selected split, default split
 
 **Superset**:
 An ordered line-up of exercises trained in rotation, sitting directly under a
@@ -115,8 +133,8 @@ per set and never per session, and they ship as a badge on the set row only.
 _Avoid_: PB, best, record
 
 **User data**:
-The complete collection of a user's sessions. The unit that gets backed up,
-exported, adopted at sign-in, and discarded on collision. Deliberately excludes
+The complete collection of a user's sessions and splits. The unit that gets backed
+up, exported, adopted at sign-in, and discarded on collision. Deliberately excludes
 the account, friendships and friend requests.
 _Avoid_: Log, history, records
 
@@ -164,3 +182,12 @@ _Avoid_: Nickname, label
 The account-level name a friend sees, seeded from the sign-in provider where
 available and always editable in-app.
 _Avoid_: Username, handle
+
+**Split grant**:
+Permission for one chosen friend to see your active split — its days, which day
+you last trained and which comes next, and nothing else. It is one-directional
+and per-friend: granting yours does not get you theirs. It is revoked silently,
+and removing the friend revokes it. It conveys no access to sessions, to session
+history or to dates, which is what keeps it from quietly becoming a general view
+onto someone's training record.
+_Avoid_: Share, subscription, follow
