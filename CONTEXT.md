@@ -133,9 +133,14 @@ per set and never per session, and they ship as a badge on the set row only.
 _Avoid_: PB, best, record
 
 **User data**:
-The complete collection of a user's sessions and splits. The unit that gets backed
-up, exported, adopted at sign-in, and discarded on collision. Deliberately excludes
-the account, friendships and friend requests.
+The complete collection of a user's sessions, splits and exercise library, together
+with the global unit preference that seeds new exercises. The unit that gets backed
+up, exported, adopted at sign-in, and discarded on collision. The library is part of
+it because a set names an exercise: a record without it round-trips into sets that
+reference nothing, unlike a session's reference to a split day, which is weak and
+allowed to dangle. Deliberately excludes the account, friendships and friend
+requests, and equally excludes device state such as the sign-in nudge suppression
+and the ad usage counter — restoring a record must never reset those.
 _Avoid_: Log, history, records
 
 `Log` is reserved for its ordinary programming meaning and never names a domain
@@ -150,8 +155,12 @@ _Avoid_: User, profile, login
 
 **Recorder**:
 A friend attached to a live session by that session's owner, able to write into it
-while holding that session's pen. A recorder is provenance, never ownership — the
-session and its sets belong to the owner regardless of who entered them.
+while holding that session's pen. A recorder never owns anything — the session and
+its sets belong to the owner regardless of who entered them, which is why removing a
+friend leaves every set they entered untouched. Nothing records *which* sets a
+recorder entered: one writer at a time removed the only thing that ever needed to
+know, so a set is the owner's record of what was lifted and never an account of who
+typed it.
 _Avoid_: Trainer, coach, editor
 
 **Pen**:
