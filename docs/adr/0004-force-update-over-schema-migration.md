@@ -57,6 +57,13 @@ path, in order to soften a state that only arises after a user has ignored
 updates long enough for the floor to move. If an old device cannot update, it
 cannot be used.
 
+That reasoning covers the user who *will not* update, and it does not reach the
+user who *cannot*. A device stranded below the minimum OS floor is never offered
+the new build at all, so no action available to its owner can ever clear the
+gate. [Minimum supported OS versions](https://github.com/kingdragonfly43/gym-notes/issues/17)
+found that case and answered it with a single export action rather than a
+readable app; see the consequences below.
+
 **Reserving room for known growth** was considered and declined. Completion
 ratio is already a number, so markings beyond half reps need no schema change,
 and the post-v1 backlog mostly adds collections rather than changing existing
@@ -96,8 +103,25 @@ update, and that is an acceptable price.
   exercise with a measurement type the owner's app cannot interpret would lock
   the owner out of their own record.
 - **The minimum OS floor now evicts devices rather than degrading them**, since
-  there is no read-only fallback. This is a direct input to
-  [Minimum supported OS versions](https://github.com/kingdragonfly43/gym-notes/issues/17).
+  there is no read-only fallback. This was a direct input to
+  [Minimum supported OS versions](https://github.com/kingdragonfly43/gym-notes/issues/17),
+  which settled the floor at **iOS 18 / Android API 28** and amended this ADR as
+  the two bullets below.
+- **A device that cannot update gets one action: export.** Where the app is
+  below the minimum supported app version *and* the device's OS is below the
+  floor of the currently-released build, the launch gate offers export and
+  nothing else — no browsing, no logging, no statistics. This is not the
+  read-only app rejected above; it is a fire exit, and it exists because the
+  export file is the rescue artifact standing between a user and years of lost
+  lifts, and it would otherwise sit behind a launch screen refusing to start.
+  A user who never signed in has no cloud copy either, so without it their
+  record is simply gone through no fault of their own.
+- **The force-update document carries the current build's OS floor per
+  platform**, alongside the minimum supported app version. The app knows its own
+  floor but not the released build's, so this field is the only way the launch
+  gate can tell "cannot update" from "will not update" — and the two states need
+  different wording, not merely different buttons. "Update to continue" is a lie
+  to a device that will never be offered the update.
 - **One device per account has to be actively enforced.** Firebase Auth will
   sign one credential in on any number of devices, so this needs an active
   device recorded on the account and a new sign-in deposing the old one — along
