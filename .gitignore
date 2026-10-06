@@ -1,2 +1,5 @@
 # Agent worktrees, created per-session and not part of the repo's history
 .claude/worktrees/
+
+# Throwaway /wizard scripts and the values they capture: local-only, never committed
+.wizards/
