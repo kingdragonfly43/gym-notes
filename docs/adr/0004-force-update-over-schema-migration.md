@@ -7,8 +7,8 @@ one: **the stored shape only ever gains optional fields, no schema version is
 stored in user data at all, and a change that cannot be made additively is
 shipped as a forced update.**
 
-Two supporting rules make that hold: **one device signed in per account at a
-time**, and **attaching a recorder requires both apps at the same schema
+Two supporting rules make that hold: **one installation signed in per account
+at a time**, and **attaching a recorder requires both apps at the same schema
 version**.
 
 ## Considered options
@@ -37,16 +37,16 @@ recorder writing a newer shape is prevented by the attachment check; a newer
 export file is refused outright by
 [the import format](https://github.com/kingdragonfly43/gym-notes/issues/15); a
 restore onto a device too old to run the current build never yields a running
-app; and a second device on one account is not allowed. With those closed, the
+app; and a second installation on one account is not allowed. With those closed, the
 comparison can never come out true, and a field whose only job is to detect an
 unreachable state is dead defensive code — the kind most likely to be wrong on
 the day it finally runs.
 
 **A per-record version gate rather than a global floor** was argued for on
 precision: it would block only the devices that have genuinely met data they
-cannot read, leaving a single-device user who has not updated in six months to
-carry on untroubled. The precision turns out to buy nothing once one device per
-account is the rule, and it costs the stored version field that the previous
+cannot read, leaving a single-installation user who has not updated in six months
+to carry on untroubled. The precision turns out to buy nothing once one
+installation per account is the rule, and it costs the stored version field that the previous
 paragraph removes.
 
 **Blocking writes while leaving history readable** was the proposed humane
@@ -122,9 +122,14 @@ update, and that is an acceptable price.
   gate can tell "cannot update" from "will not update" — and the two states need
   different wording, not merely different buttons. "Update to continue" is a lie
   to a device that will never be offered the update.
-- **One device per account has to be actively enforced.** Firebase Auth will
-  sign one credential in on any number of devices, so this needs an active
-  device recorded on the account and a new sign-in deposing the old one — along
-  with an answer for the deposed device's local cache and its queued offline
-  writes. That is an identity decision rather than a schema one and is
-  ticketed separately.
+- **One installation per account is enforced by the app, not the platform**,
+  since Firebase Auth will sign one credential in on any number of installations.
+  [Enforcing one installation per account](https://github.com/kingdragonfly43/gym-notes/issues/20)
+  settled it: the most recent sign-in records itself on the account, and the
+  installation it replaces signs itself out the next time it is online. That
+  closes the route above for every read and write made from then on, but **not
+  for writes already queued offline** on the replaced installation, which race
+  its sign-out and may land once. They are harmless here: an older build's writes
+  are safe under expand-only and changed-fields-only, and a newer build's could
+  only matter for a breaking change during the rollout window, which is already
+  the narrowest case this ADR accepts.

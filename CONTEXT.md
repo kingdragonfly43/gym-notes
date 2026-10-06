@@ -139,7 +139,7 @@ up, exported, adopted at sign-in, and discarded on collision. The library is par
 it because a set names an exercise: a record without it round-trips into sets that
 reference nothing, unlike a session's reference to a split day, which is weak and
 allowed to dangle. Deliberately excludes the account, friendships and friend
-requests, and equally excludes device state such as the sign-in nudge suppression
+requests, and equally excludes installation state such as the sign-in nudge suppression
 and the ad usage counter — restoring a record must never reset those.
 _Avoid_: Log, history, records
 
@@ -152,6 +152,16 @@ concept here.
 The identity a user's data belongs to. Exists from first launch as an anonymous account,
 and becomes a signed-in account when linked to a Google or Apple credential.
 _Avoid_: User, profile, login
+
+**Installation**:
+One install of the app on one phone: the thing a signed-in account is signed in on.
+An account is signed in on at most one installation at a time, and the most recent
+sign-in wins; the installation it replaces signs itself out the next time it is
+online, keeping its local copy of the user data. Reinstalling the app makes a new
+installation, even on the same phone, because the app has no way to recognise a
+phone, only its own install. An anonymous account lives on exactly one installation
+by construction.
+_Avoid_: Device, phone (except in user-facing copy)
 
 **Recorder**:
 A friend attached to a live session by that session's owner, able to write into it
