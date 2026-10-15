@@ -107,21 +107,30 @@ update, and that is an acceptable price.
   [Minimum supported OS versions](https://github.com/kingdragonfly43/gym-notes/issues/17),
   which settled the floor at **iOS 18 / Android API 28** and amended this ADR as
   the two bullets below.
-- **A device that cannot update gets one action: export.** Where the app is
-  below the minimum supported app version *and* the device's OS is below the
-  floor of the currently-released build, the launch gate offers export and
-  nothing else — no browsing, no logging, no statistics. This is not the
+- **Every installation the launch gate refuses gets one action besides
+  updating: export** — no browsing, no logging, no statistics. This is not the
   read-only app rejected above; it is a fire exit, and it exists because the
   export file is the rescue artifact standing between a user and years of lost
   lifts, and it would otherwise sit behind a launch screen refusing to start.
   A user who never signed in has no cloud copy either, so without it their
-  record is simply gone through no fault of their own.
+  record is simply gone through no fault of their own. Minimum supported OS
+  versions first offered it only below the released build's OS floor;
+  [EEA and UK at launch](https://github.com/kingdragonfly43/gym-notes/issues/22)
+  widened it to every refused installation, because v1 is sold in the United
+  States only and a phone on a current OS can be stranded too: a user who moves
+  abroad and switches their store account to a country where the app is not
+  sold is never offered the update either. The app cannot tell that case apart,
+  since it never knows where anyone is, so the exit has to be on the gate for
+  everyone. Showing it to someone who merely has not updated costs nothing.
 - **The force-update document carries the current build's OS floor per
   platform**, alongside the minimum supported app version. The app knows its own
   floor but not the released build's, so this field is the only way the launch
   gate can tell "cannot update" from "will not update" — and the two states need
   different wording, not merely different buttons. "Update to continue" is a lie
-  to a device that will never be offered the update.
+  to a device that will never be offered the update. Even the "will not update"
+  wording must not promise the update is on offer, since a store-country change
+  strands a phone this field cannot see: it reads "Update to continue. If the
+  update isn't offered to you, you can export your data here."
 - **One installation per account is enforced by the app, not the platform**,
   since Firebase Auth will sign one credential in on any number of installations.
   [Enforcing one installation per account](https://github.com/kingdragonfly43/gym-notes/issues/20)
