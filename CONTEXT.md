@@ -163,6 +163,15 @@ phone, only its own install. An anonymous account lives on exactly one installat
 by construction.
 _Avoid_: Device, phone (except in user-facing copy)
 
+**Age signal**:
+The age bracket an app store reports for a user, consumed only where a state law
+obliges the app to. It belongs to the installation, never to the account or the user
+data, so it is never backed up, exported or shared. It changes one thing: a user the
+store reports as under 13 — or whose age the store cannot give where the law applies —
+keeps the full app on their own phone but cannot sign in, and so has no friends and
+cannot record or be recorded for. Everyone else is treated alike regardless of age.
+_Avoid_: Age gate, age verification, birthday, date of birth
+
 **Recorder**:
 A friend attached to a live session by that session's owner, able to write into it
 while holding that session's pen. A recorder never owns anything — the session and
