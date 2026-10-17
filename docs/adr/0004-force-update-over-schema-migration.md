@@ -28,6 +28,15 @@ is not available in v1 at all. The machinery is kept as a declared exception
 that has to justify itself, because promising never to need it is a promise
 broken under duress and then handled badly.
 
+[ADR-0005](0005-blaze-for-server-side-account-deletion.md) later moved the
+project to Blaze for account deletion, which removes **the cost half of this
+argument**: rewriting a heavy user's record now costs about two cents, and a
+server exists to run it. The rejection stands on what remains. A rewrite still
+has to know which records it has already rewritten, which is the stored schema
+version rejected below. It also has to contend with installations that were
+offline throughout, which flush old-shape writes into the record after it has
+been rewritten. Expand-only with a forced update needs neither.
+
 **A schema version stored on the user-data root**, compared against a constant
 in the app, was designed in full before being discarded. The reasoning was that
 the app knows what it understands while only the record can say what has been

@@ -153,6 +153,16 @@ The identity a user's data belongs to. Exists from first launch as an anonymous 
 and becomes a signed-in account when linked to a Google or Apple credential.
 _Avoid_: User, profile, login
 
+**Account deletion**:
+Erasing a signed-in account, its cloud copy of the user data, and everything about it
+stored with other accounts: its friendships, friend requests and split grants. The
+installation that deletes is left exactly as a sign-out leaves it, under a new
+anonymous account, unless the user also chooses to erase it. Copies on other
+installations are never erased. Sets the deleted account entered as a recorder stay
+in their owners' sessions. Not to be confused with erasing an installation's data,
+which is the only deletion a never-signed-in user has.
+_Avoid_: Deactivate, close account, unlink
+
 **Installation**:
 One install of the app on one phone: the thing a signed-in account is signed in on.
 An account is signed in on at most one installation at a time, and the most recent
