@@ -93,7 +93,9 @@ field.
   plan just to provision**, even if usage stays inside the free allotment.
   Not needed for v1, but the moment either is introduced, a billing budget
   alert must be attached at the same time — an unbounded card on Blaze is the
-  standard footgun.
+  standard footgun. **Superseded for Cloud Functions** by
+  [ADR-0005](0005-blaze-for-server-side-account-deletion.md): account deletion
+  needs a server, so the project moves to Blaze for v1.
 - The anonymous-to-signed-in upgrade uses `linkWithCredential()`, which
   preserves the Firebase UID and therefore the user's whole log — this is the
   mechanism the "local-first with optional sign-in, never lose two years of
