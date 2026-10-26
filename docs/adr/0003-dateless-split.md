@@ -4,7 +4,7 @@ A **split** answers one question — what do I train today? — and the obvious 
 build it is a calendar: pick a cycle length, anchor it to a start date, and colour
 in the days. We did not do that. A split is a cycle of **training days only**, with
 no dates and no rest days, and it advances when a session is completed rather than
-when a day passes. There is no calendar surface in the app.
+when a day passes. There is no calendar of the split anywhere in the app.
 
 ## Considered options
 
@@ -44,6 +44,10 @@ set by personal records, which are derived on read and never stored.
   listing the user's splits, and on one tappable line in the new-session flow
   reading "Day 2 · Pull". The past is already served by the session ledger; a
   calendar would be a second view of the same data.
+  *Amended by [The app shell](https://github.com/kingdragonfly43/gym-notes/issues/30):*
+  this rules out a calendar **of the split**. History later gained a month view of
+  past sessions, which shows training days that happened and never the split or a
+  future day, so it cannot drift and cannot nag.
 - **Training out of order costs nothing.** The next session offers the derived next
   day, and the user may pick any other day of the active split instead, or type a
   free-text agenda belonging to no day at all. A free-text session references no

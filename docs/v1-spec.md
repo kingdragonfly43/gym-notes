@@ -11,10 +11,9 @@ the ticket's latest resolution wins and this document is the bug. Vocabulary fol
 `CONTEXT.md` exactly: an **exercise** is never a "workout", and `log` never names a
 domain concept.
 
-**Three areas are still open** and marked **⚠ Open** where they appear. Each is a
+**Two areas are still open** and marked **⚠ Open** where they appear. Each is a
 ticket on the map; build work that touches them waits for it:
 
-- [The app shell: top-level navigation and history](https://github.com/kingdragonfly43/gym-notes/issues/30)
 - [The recorder's screen during a live shared session](https://github.com/kingdragonfly43/gym-notes/issues/32)
 - [Where a never-signed-in user's data lives](https://github.com/kingdragonfly43/gym-notes/issues/31)
 
@@ -36,7 +35,8 @@ possible way to enter a set, with no account, no sign-in wall and no onboarding.
   onboarding questionnaire. Anything that compromises this has to justify itself
   loudly. The one exception is a legally required store age check, and only in the
   three states whose laws require it (§7.6).
-- **A tight set-entry path.** Two taps from cold open to a saved set (§4).
+- **A tight set-entry path.** Two taps to a saved set inside a session, three from
+  cold open (§4).
 - **Symmetric peers, no roles.** Anyone can record for anyone; two people can record
   for each other at once, each owning their own session. There are no trainer or
   trainee roles.
@@ -205,8 +205,9 @@ Source: [The split and the training calendar](https://github.com/kingdragonfly43
     days, edit agendas;
   - **one tappable line in the new-session flow**, e.g. "Day 2 · Pull".
 
-  **There is no calendar surface.** The empty split screen is a single card that
-  explains splits, with one button.
+  **There is no calendar surface for the split.** History's month view (§4.4) shows
+  past sessions only, never the split or a future day. The empty split screen is a
+  single card that explains splits, with one button.
 
 ---
 
@@ -218,8 +219,9 @@ The prototypes are on the
 branch (`screens.html` is the settled round). Design target: **iPhone SE 3 at
 375×667**, the smallest and weakest device in the user base.
 
-**Cold open to a saved set: 2 taps, no typing**: open the session, tap the exercise,
-save.
+**Inside a session, 2 taps to a saved set, no typing**: tap the exercise, save.
+**From cold open with a live session it is 3**: Continue on the Today tab, tap the
+exercise, save. Cold open lands on Today rather than in the session (§4.4).
 
 ### 4.1 Screens
 
@@ -262,12 +264,52 @@ The shape is **screen per exercise**, as in FitNotes. Inside a session:
 
 The new-session flow takes the derived split line ("Day 2 · Pull", tappable) and an
 editable agenda copied from that day. With no active split, the agenda starts empty.
-The agenda is stored on the session as a copy.
+The agenda is stored on the session as a copy. The flow lives on the Today tab
+(§4.4).
 
-> **⚠ Open: the app shell.** Everything *around* a session has not been designed:
-> the home screen, how past sessions are browsed, per-exercise history, whether any
-> progress graph ships, and where friends and settings live.
-> See [The app shell: top-level navigation and history](https://github.com/kingdragonfly43/gym-notes/issues/30).
+### 4.4 The app shell
+
+Source: [The app shell: top-level navigation and history](https://github.com/kingdragonfly43/gym-notes/issues/30).
+The prototype is on the
+[`prototype/app-shell`](https://github.com/kingdragonfly43/gym-notes/tree/prototype/app-shell/prototypes/app-shell)
+branch. The settled shell is that prototype's shell A with shell B's Today screen and
+shell B's per-exercise history.
+
+- **A persistent bottom tab bar with four tabs: Today, History, Exercises,
+  Friends.** It is hidden inside a session's flow (session index, picker, entry
+  screen, new exercise form). Settings is a gear at the top of Today.
+- **Cold open always lands on Today**, live session or not.
+- **Today shows today only**: no day arrows and no calendar, because past days
+  belong to History.
+  - Each of today's sessions appears as its ledger. A date may hold more than one
+    session.
+  - A **live session is read-only on Today**, with two buttons: **Continue**, which
+    opens the session index, and **Finish**, which ends the session.
+  - With no live session, the **Start session** block sits here (§4.3).
+  - First run shows only the Start session block, with no onboarding.
+- **History** lists past sessions newest first under month headers. It has a
+  **List | Month** switch. Month is a calendar grid of past training days; tapping a
+  day opens its session, or lists them if there are several. A session opens as its
+  read-only ledger, with **Reopen** while the one-hour window (§3.6) is open. This
+  month view of the past is **not a split calendar**: it never shows the split or a
+  future day (ADR-0003).
+- **Exercises** is the library as the picker's category tree. An exercise opens on
+  **History | Graph** tabs.
+- **Per-exercise history** also sits on the entry screen as **Track | History |
+  Graph** tabs, where Track is the entry screen of §4.1.
+  - *History*: one row per past session that had the exercise, with its date, agenda
+    and sets, and PR badges.
+  - *Graph*: **one progress line per exercise** with one point per past session. For
+    *weight and reps* the point is the top-step weight of that session's
+    highest-volume set; for *bodyweight and reps* it is that session's highest rep
+    count. This single line is the only graph in v1. Anything beyond it is analytics,
+    which is post-v1 (§13).
+- **Friends** holds the friend list, a Requests row with a count badge (also shown on
+  the tab), **My QR code** and **Add friend (scan)**. Signed out, each of these swaps
+  in place to the sign-in prompt (§6.5).
+- **Settings** holds Units, Splits (§3.7), Export / Import (§5), Remove Ads and
+  Restore Purchases (§10.2), Account (sign in, sign out, delete account) and the
+  Privacy Policy.
 
 ---
 
@@ -846,8 +888,9 @@ new effort.
 - **Shipping v1 to the stores**, which is beyond this spec's destination.
 
 **Post-v1 backlog**, kept so the v1 model does not paint them into a corner:
-routines/programs, analytics, the **standing view grant** (a friend's durable
-read-only window onto your sessions), and a **subscription wedge**, whose leading
+routines/programs, analytics (beyond the one progress line per exercise in §4.4),
+the **standing view grant** (a friend's durable read-only window onto your
+sessions), and a **subscription wedge**, whose leading
 candidate is AI-assisted training suggestions. Any suggestion feature is bounded by
 the no-health-conclusions rule and the no-AI-training promise.
 
@@ -863,7 +906,7 @@ week they are written (§2).
 |---|---|---|---|
 | 1 | **Foundations** | Flutter project; Firebase on Blaze with budget alert; Firestore offline persistence; installation ID; Crashlytics with its switch; the local-data arrangement for never-signed-in users | ⚠ [Where a never-signed-in user's data lives](https://github.com/kingdragonfly43/gym-notes/issues/31) |
 | 2 | **Solo set entry** | Categories, exercises, starter library; sessions → supersets → rounds → sets → steps; session index, picker, entry screen, new exercise form; prefill, steppers, auto-advance, drop set, half rep, rest timer, PR badge; session lifecycle, reopen, mark-delete; units | — |
-| 3 | **App shell and history** | Home, browsing past sessions, per-exercise history, settings | ⚠ [The app shell](https://github.com/kingdragonfly43/gym-notes/issues/30) |
+| 3 | **App shell and history** | Tab bar; Today with Continue/Finish and the Start session block; History list and month view; session detail and reopen; Exercises library; per-exercise History and Graph tabs; Friends tab shell; Settings | 2 |
 | 4 | **Splits** | Splits list, active split, derived next day, "Day 2 · Pull" line, agenda copy | — |
 | 5 | **Export, import and the launch gate** | Export file, share sheet, import replace with validation; force-update document, launch gate and export fire exit | — |
 | 6 | **Sign-in and cloud backup** | Sign-in sheet with consent; linking; choose-one prompt; sign-out; one installation per account; sign-in nudge; age signals and the under-13 rule; **account deletion** (server function, daily cleanup, Apple revocation) | 1 |
@@ -921,7 +964,7 @@ config files live in a gitignored folder in the repo.
 
 ## 15. Open questions carried into the build
 
-- **The three ⚠ Open tickets** above. Each one's resolution amends this document.
+- **The two ⚠ Open tickets** above. Each one's resolution amends this document.
 - **Watch list:** New York S9269 (health privacy bill, pending); Washington AG
   guidance on fitness data; the *In re Amazon Ads SDK* litigation; Play's API 37
   target date; the Utah and Louisiana effective-date changes.
