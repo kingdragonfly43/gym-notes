@@ -1,0 +1,1212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PROTOTYPE — App shell</title>
+<!--
+  THROWAWAY PROTOTYPE, not app code, for GitHub issue #30 "The app shell: top-level
+  navigation and history", building on the set-entry hot path prototype (#10).
+
+  Plan: Three shells, switchable via ?shell=A|B|C, each wrapping the settled hot-path screens.
+
+  The four hot-path screens settled earlier (session index IDX1, exercise picker PK1,
+  entry screen EN1, new-exercise form NX1) are copied in unchanged in spirit; the banner
+  ad is gone. Everything else (home, history, per-exercise history, graph, Friends,
+  Splits, Settings) differs per shell. Other HUD toggles: ?live=1|0 &signed=1|0
+  &graph=1|0 &data=seed|empty &split=ppl|none. State lives in memory only.
+-->
+<style>
+  :root{
+    --bg:#0d0f12; --panel:#15181d; --panel2:#1c2027; --line:#272c34;
+    --ink:#eef1f5; --dim:#8b95a3; --accent:#4ea3ff; --good:#3ddc84; --warn:#ffb020; --pr:#ffd23f;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:#07080a;color:var(--ink);
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex;gap:28px;align-items:flex-start;justify-content:center;
+    padding:28px 20px 110px;flex-wrap:wrap}
+  h1,h2,h3,h4{margin:0}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  button[disabled]{opacity:.4;pointer-events:none}
+  input,textarea{font:inherit}
+
+  /* ---- phone frame ---- */
+  .phone{width:375px;height:667px;background:var(--bg);border-radius:26px;
+    border:1px solid #2b3039;overflow:hidden;position:relative;display:flex;flex-direction:column;
+    box-shadow:0 24px 60px rgba(0,0,0,.6)}
+  .statusbar{height:22px;flex:none;display:flex;align-items:center;justify-content:space-between;
+    padding:0 14px;font-size:11px;color:var(--dim);background:#0a0c0f}
+  .screen{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+  .scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+
+  /* ---- shared atoms ---- */
+  .row{display:flex;align-items:center;gap:8px}
+  .sp{flex:1}
+  .dim{color:var(--dim)}
+  .tiny{font-size:11px}
+  .hdr{flex:none;padding:10px 14px;border-bottom:1px solid var(--line);background:#111419}
+  .num{font-variant-numeric:tabular-nums;font-family:var(--mono)}
+  .pill{display:inline-block;padding:2px 7px;border-radius:99px;font-size:10px;font-weight:700;
+    letter-spacing:.04em}
+  .pill.pr{background:var(--pr);color:#3a2f00}
+  .pill.half{background:#3a3146;color:#cbb3ff}
+  .pill.drop{background:#3a2a2a;color:#ffb3b3}
+  .pill.bw{background:#17323f;color:#8fd4f5}
+  .pill.live{background:#12351f;color:var(--good)}
+  .pill.act{background:var(--accent);color:#06213d}
+  .btn{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:10px 12px;font-weight:600}
+  .btn.primary{background:var(--accent);color:#06213d;border-color:transparent}
+  .btn.big{padding:16px;font-size:17px;border-radius:14px;width:100%;text-align:center}
+  .badge{background:#ff4d4f;color:#fff;border-radius:99px;font-size:10px;font-weight:700;
+    padding:1px 6px;min-width:18px;text-align:center;display:inline-block}
+
+  /* ---- HUD ---- */
+  .hud{width:330px;font-size:12px}
+  .hud h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);
+    margin-bottom:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;
+    margin-bottom:12px}
+  .taps{font-family:var(--mono);font-size:34px;font-weight:700}
+  .task{color:var(--warn);font-size:12px;line-height:1.5}
+  pre{margin:0;font-family:var(--mono);font-size:11px;line-height:1.45;color:#b9c2cf;
+    white-space:pre-wrap;max-height:320px;overflow:auto}
+  .hud .btn{padding:7px 10px;font-size:12px}
+  .qs li{margin-bottom:8px;color:#c3ccd8}
+  .qs{padding-left:16px;margin:0}
+  .tg{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+  .tg .l{width:92px;color:var(--dim)}
+  .tg .opts{display:flex;gap:4px;flex:1}
+  .tg .opts button{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    padding:5px 4px;font-size:11px;font-weight:600}
+  .tg .opts button.on{background:var(--accent);color:#06213d;border-color:transparent}
+
+  /* ---- switcher ---- */
+  .switcher{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:99;
+    display:flex;align-items:center;gap:4px;background:#fff;color:#111;border-radius:99px;
+    padding:6px;box-shadow:0 10px 30px rgba(0,0,0,.5);font-weight:700}
+  .switcher button{padding:6px 12px;border-radius:99px;font-size:18px;line-height:1}
+  .switcher button:hover{background:#eceff3}
+  .switcher .lbl{padding:0 12px;font-size:13px;white-space:nowrap}
+
+  /* ---- hot-path screens (copied) ---- */
+  .ix1-row{padding:12px 14px;border-bottom:1px solid var(--line)}
+  .ix1-set{display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px}
+  .pk-row{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+  .pk-search{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:10px;color:var(--ink);font:inherit}
+  .a1-stepper{display:flex;align-items:center;justify-content:space-between;gap:8px;
+    background:var(--panel2);border-radius:14px;padding:8px;margin-bottom:10px}
+  .a1-stepper .v{font-family:var(--mono);font-size:30px;font-weight:700;min-width:92px;text-align:center}
+  .pm{width:52px;height:52px;border-radius:12px;background:#2a3038;font-size:24px;
+    display:flex;align-items:center;justify-content:center}
+  .pk1-catlist{display:flex;flex-direction:column;gap:8px;padding:6px 14px 14px}
+  .pk1-catrow{display:flex;align-items:center;gap:10px;background:var(--panel2);border-radius:10px;
+    border-left:4px solid var(--accent);padding:14px;min-height:48px}
+  .pk1-catrow .chev{color:var(--dim);font-size:18px;line-height:1}
+  .nx-catrow{display:flex;gap:6px;flex-wrap:wrap}
+  .nx-chip{background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:7px 12px;
+    font-size:12px;font-weight:600}
+  .nx-chip.on{background:var(--accent);color:#06213d;border-color:transparent}
+  .nx-seg{display:flex;gap:6px}
+  .nx-seg button{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:10px;font-size:12px;font-weight:600}
+  .nx-seg button.on{background:var(--accent);color:#06213d;border-color:transparent}
+  .nx-notes{width:100%;min-height:70px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:10px;padding:10px;color:var(--ink);font:inherit;resize:vertical}
+
+  /* ---- shell bits ---- */
+  .tabbar{flex:none;display:flex;border-top:1px solid var(--line);background:#0f1217;height:56px}
+  .tabbar button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:1px;font-size:10px;color:var(--dim);position:relative}
+  .tabbar button.on{color:var(--accent)}
+  .tabbar .ic{font-size:18px;line-height:1}
+  .tabbar .badge{position:absolute;top:4px;left:56%}
+  .seg{display:flex;gap:6px;padding:10px 14px}
+  .seg button{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:8px;font-size:12px;font-weight:600}
+  .seg button.on{background:var(--accent);color:#06213d;border-color:transparent}
+  .etabs{flex:none;display:flex;border-bottom:1px solid var(--line);background:#111419}
+  .etabs button{flex:1;padding:10px;font-size:13px;font-weight:600;color:var(--dim);
+    border-bottom:2px solid transparent}
+  .etabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
+  .pcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px}
+  .resume{background:linear-gradient(180deg,#182233,#12161b);border:1px solid var(--accent);padding:18px}
+  .mh{position:sticky;top:0;background:#11151a;color:var(--dim);font-size:11px;font-weight:700;
+    padding:5px 14px;letter-spacing:.05em;text-transform:uppercase;z-index:1}
+  .srow{display:flex;align-items:center;gap:8px;padding:14px;border-bottom:1px solid var(--line)}
+  .srow .chev{color:var(--dim);font-size:18px;line-height:1}
+  .sech{padding:14px 14px 6px;font-size:11px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase}
+  .splitline{display:flex;align-items:center;gap:8px;width:100%;background:var(--panel2);
+    border:1px solid var(--line);border-radius:10px;padding:12px;font-weight:700;font-size:16px;text-align:left}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:0 10px 10px}
+  .cal-h{text-align:center;font-size:10px;color:var(--dim);padding:2px 0}
+  .cal-cell{aspect-ratio:1;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:12px}
+  .cal-cell.today{border-color:var(--accent)}
+  .cal-cell.sel{background:#223148}
+  .dots{display:flex;gap:2px;height:5px}
+  .dots i{width:5px;height:5px;border-radius:99px;background:var(--good)}
+  .sheet-bg{position:absolute;inset:0;background:rgba(0,0,0,.55);z-index:20}
+  .sheet{position:absolute;left:0;right:0;bottom:0;height:70%;background:#12161c;
+    border-radius:18px 18px 0 0;z-index:21;display:flex;flex-direction:column;border-top:1px solid var(--line)}
+  .sheet .grab{width:40px;height:4px;border-radius:99px;background:#3a4048;margin:8px auto 4px}
+  .menu{position:absolute;top:0;left:0;bottom:0;width:240px;background:#12161c;z-index:21;
+    border-right:1px solid var(--line);padding-top:8px}
+  .toast{position:absolute;bottom:70px;left:50%;transform:translateX(-50%);background:#fff;color:#111;
+    padding:8px 14px;border-radius:99px;font-size:12px;font-weight:600;z-index:30;white-space:nowrap}
+  .exlink{text-decoration:underline;text-decoration-color:#4a5360;text-underline-offset:3px}
+  .tlcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 12px 8px}
+  .avatar{width:34px;height:34px;border-radius:99px;background:#243043;color:#8fb8e8;display:flex;
+    align-items:center;justify-content:center;font-weight:700;flex:none}
+  .ibtn{position:relative;width:34px;height:34px;border-radius:99px;display:flex;align-items:center;
+    justify-content:center;font-size:18px;background:var(--panel2)}
+  .ibtn .badge{position:absolute;top:-3px;right:-4px}
+</style>
+</head>
+<body>
+
+<div class="phone"><div class="statusbar"><span>9:41</span><span>PROTOTYPE</span><span>100%</span></div><div class="screen" id="screen"></div></div>
+
+<div class="hud">
+  <div class="card">
+    <h2>Try this</h2>
+    <div class="task" id="taskline"></div>
+    <div class="row" style="margin-top:10px">
+      <div><div class="taps" id="taps">0</div><div class="tiny dim">interactions since cold open</div>
+        <div class="tiny dim" id="tapsbreak"></div></div>
+      <div class="sp"></div>
+      <button class="btn" data-reset>Cold open ⟲</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Toggles</h2>
+    <div id="toggles"></div>
+  </div>
+  <div class="card">
+    <h2>State</h2>
+    <pre id="state"></pre>
+  </div>
+  <div class="card">
+    <h2>What the three shells bet on</h2>
+    <ul class="qs tiny" id="notes"></ul>
+  </div>
+</div>
+
+<div class="switcher">
+  <button data-nav="-1">‹</button><span class="lbl" id="vlabel"></span><button data-nav="1">›</button>
+</div>
+
+<script>
+/* ============================ DATA ============================ */
+const TODAY = '2026-10-24';          // Saturday
+const NOW_MIN = 9*60+41;             // 9:41 AM, matches the status bar
+const INCR = 5;                      // lb — global increment. Never 2.5, never kg.
+const CATS = ['Back','Chest','Shoulders','Legs','Arms','Core'];
+const BASE_EXS = [
+  ['lat-pulldown','Lat Pulldown','Back','weight','Technogym'],
+  ['barbell-row','Barbell Row','Back','weight',''],
+  ['seated-row','Seated Cable Row','Back','weight','Life Fitness'],
+  ['face-pull','Face Pull','Back','weight',''],
+  ['pull-up','Pull Up','Back','bodyweight',''],
+  ['chin-up','Chin Up','Back','bodyweight',''],
+  ['deadlift','Deadlift','Back','weight',''],
+  ['t-bar-row','T-Bar Row','Back','weight',''],
+  ['bench-press','Bench Press','Chest','weight',''],
+  ['incline-db-press','Incline DB Press','Chest','weight',''],
+  ['cable-fly','Cable Fly','Chest','weight','Technogym'],
+  ['dip','Dip','Chest','bodyweight',''],
+  ['push-up','Push Up','Chest','bodyweight',''],
+  ['ohp','Overhead Press','Shoulders','weight',''],
+  ['lateral-raise','Lateral Raise','Shoulders','weight',''],
+  ['rear-delt-fly','Rear Delt Fly','Shoulders','weight',''],
+  ['squat','Back Squat','Legs','weight',''],
+  ['leg-press','Leg Press','Legs','weight','Hammer'],
+  ['rdl','Romanian Deadlift','Legs','weight',''],
+  ['leg-curl','Leg Curl','Legs','weight',''],
+  ['leg-extension','Leg Extension','Legs','weight',''],
+  ['calf-raise','Standing Calf Raise','Legs','weight',''],
+  ['bb-curl','Barbell Curl','Arms','weight',''],
+  ['hammer-curl','Hammer Curl','Arms','weight',''],
+  ['tricep-pushdown','Tricep Pushdown','Arms','weight',''],
+  ['skullcrusher','Skullcrusher','Arms','weight',''],
+  ['preacher-curl','Preacher Curl','Arms','weight',''],
+  ['cable-crunch','Cable Crunch','Core','weight',''],
+  ['hanging-leg-raise','Hanging Leg Raise','Core','bodyweight',''],
+  ['plank','Plank','Core','bodyweight',''],
+];
+let EXS=[], EX={};
+function resetLibrary(){
+  EXS = BASE_EXS.map(([id,name,cat,type,brand])=>({id,name,cat,type,brand,unit:'lb',notes:''}));
+  EX = Object.fromEntries(EXS.map(e=>[e.id,e]));
+}
+
+/* ---- date helpers (all UTC so the prototype is timezone-proof) ---- */
+const D = s => new Date(s+'T00:00:00Z');
+const dstr = d => d.toISOString().slice(0,10);
+const addDays = (s,n) => dstr(new Date(D(s).getTime()+n*864e5));
+const diffDays = (a,b) => Math.round((D(a)-D(b))/864e5);
+const fmtDate = (s,o) => D(s).toLocaleDateString('en-US',Object.assign({timeZone:'UTC'},o));
+const dShort = s => fmtDate(s,{weekday:'short',month:'short',day:'numeric'});
+const monthLabel = ym => fmtDate(ym+'-01',{month:'long',year:'numeric'});
+const pad2 = n => String(n).padStart(2,'0');
+function fmtTime(m){ m=((m%1440)+1440)%1440; const h=Math.floor(m/60), mm=m%60;
+  return ((h%12)||12)+':'+pad2(mm)+(h<12?' AM':' PM'); }
+
+/* ---- deterministic seed data ---- */
+function mulberry(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+const BASE = { // id: [start weight, start reps, sessions per +5 lb]
+  'bench-press':[155,8,3],'ohp':[95,8,4],'incline-db-press':[55,10,4],'lateral-raise':[15,12,6],
+  'tricep-pushdown':[45,12,4],'pull-up':[0,6,3],'barbell-row':[135,8,3],'lat-pulldown':[110,10,3],
+  'face-pull':[40,15,5],'bb-curl':[60,10,4],'hammer-curl':[30,10,4],'squat':[185,6,3],
+  'rdl':[155,8,3],'leg-press':[270,10,3],'leg-curl':[80,10,4],'leg-extension':[90,12,4],
+  'calf-raise':[110,12,4],'skullcrusher':[50,10,4],
+};
+const PLAN = [
+  [{ex:['bench-press'],n:4},{ex:['ohp'],n:3},{ex:['incline-db-press'],n:3},{ex:['lateral-raise','tricep-pushdown'],n:3}],
+  [{ex:['pull-up'],n:3},{ex:['barbell-row'],n:4},{ex:['lat-pulldown'],n:3},{ex:['face-pull'],n:3},{ex:['bb-curl','hammer-curl'],n:3}],
+  [{ex:['squat'],n:4},{ex:['rdl'],n:3},{ex:['leg-press'],n:3},{ex:['leg-curl','leg-extension'],n:3},{ex:['calf-raise'],n:3}],
+];
+const ARMS = [{ex:['bb-curl','tricep-pushdown'],n:3},{ex:['skullcrusher'],n:3}];
+const skey = s => s.date+pad2(Math.floor(s.startMin/60))+pad2(s.startMin%60);
+
+function seedSessions(){
+  const rnd=mulberry(20261024), cnt={};
+  // 1) dates first, so the final split day can be pinned (last session = Day 1, next = Day 2)
+  const slots=[]; let date='2026-07-25', n=0, raw=0;
+  while(date<='2026-10-22'){
+    const free=(n===8||n===29);
+    slots.push({date,free,raw:free?null:raw++,pair:false});
+    if(n===19) slots.push({date,free:true,raw:null,pair:true});
+    n++;
+    date=addDays(date,1+Math.floor(rnd()*3)+(rnd()<.3?1:0));
+  }
+  const lastRaw=slots.filter(s=>s.raw!=null).pop().raw, off=(3-(lastRaw%3))%3;
+  // 2) content
+  const out=[]; let id=1;
+  slots.forEach((sl,i)=>{
+    const day = sl.raw==null ? null : (sl.raw+off)%3;
+    const plan = day==null ? ARMS : PLAN[day];
+    const par={};
+    plan.forEach(p=>p.ex.forEach(x=>{
+      const [bw,br,every]=BASE[x]; const c=cnt[x]||0; cnt[x]=c+1;
+      const isBW=EX[x].type==='bodyweight';
+      par[x]={w:isBW?0:bw+INCR*Math.floor(c/every), r:isBW?br+Math.floor(c/every):br};
+    }));
+    const supersets=plan.map(p=>({lineup:p.ex.slice(), rounds:Array.from({length:p.n},(_,ri)=>({
+      sets:p.ex.map(x=>{
+        const {w,r}=par[x]; const rr=Math.max(3,r-Math.floor(rnd()*(ri===0?2:3)));
+        let steps=[{w,r:rr,ratio:1}];
+        if(p.ex.length===1 && ri===p.n-1 && w>=40 && rnd()<.12) steps.push({w:w-15,r:rr+3,ratio:1});
+        else if(rnd()<.03) steps[0].ratio=.5;
+        return {ex:x,steps};
+      })}))}));
+    let start, dur;
+    if(sl.pair){ start=20*60+30; dur=25; }
+    else if(i===19){ start=7*60; dur=55; }
+    else { start=1050+5*Math.floor(rnd()*19); dur=50+5*Math.floor(rnd()*6); }
+    const s={id:'s'+(id++),live:false,date:sl.date,startMin:start,endMin:start+dur,
+      agenda: day==null?'Arms, quick':['Day 1 · Push','Day 2 · Pull','Day 3 · Legs'][day],
+      day, splitId: day==null?null:'ppl', supersets};
+    s.key=skey(s); out.push(s);
+  });
+  return out.sort((a,b)=>a.key<b.key?-1:1);
+}
+
+/* ============================ STATE ============================ */
+const cfg = { shell:'A', live:true, signed:false, graph:true, data:'seed', split:'ppl', land:'home' };
+let taps=0, keystrokes=0, sessions=[], splits=[], activeSplit=null, friends=[], requests=[];
+let stack=[], en={}, nx={}, pk={}, ns={}, cal={}, hist={}, tl={}, exd={}, sheet=null, menuOpen=false;
+let dayDate=TODAY, toastMsg='', lastSetAt=null, nextId=1000;
+const user = { name:'Alex Rivera' };
+const prCache = new Map();
+const scrollMem = {};
+let curKey = '';
+
+const SPLITS_SEED = () => [
+  {id:'ppl', name:'Push / Pull / Legs', days:[{agenda:'Day 1 · Push'},{agenda:'Day 2 · Pull'},{agenda:'Day 3 · Legs'}]},
+  {id:'ul', name:'Upper / Lower', days:[{agenda:'Day 1 · Upper'},{agenda:'Day 2 · Lower'}]},
+];
+
+function rebuildAll(){
+  resetLibrary();
+  prCache.clear();
+  if(cfg.data==='seed'){ sessions=seedSessions(); splits=SPLITS_SEED(); }
+  else { sessions=[]; splits=cfg.split==='ppl'?SPLITS_SEED().slice(0,1):[]; }
+  activeSplit = cfg.split==='ppl' ? 'ppl' : null;
+  friends=[{name:'Sam',info:'last session Thu'},{name:'Priya',info:'last session Wed'}];
+  requests=[{name:'Jordan'}];
+  if(cfg.live) sessions.push(mkLive());
+  lastSetAt = cfg.live ? Date.now()-185000 : null;
+  resetNav();
+}
+function mkLive(){
+  const sp=activeSplitObj(), di=derivedIdx();
+  const L={id:'live',live:true,date:TODAY,startMin:539,startMs:Date.now()-42*60000,
+    agenda: sp&&di!=null ? sp.days[di].agenda : 'Back, Core',
+    day: sp?di:null, splitId: sp?sp.id:null,
+    supersets:[
+      {lineup:['lat-pulldown'],rounds:[{sets:[{ex:'lat-pulldown',steps:[{w:135,r:10,ratio:1}]}]},
+                                       {sets:[{ex:'lat-pulldown',steps:[{w:135,r:9,ratio:1}]}]}]},
+      {lineup:['barbell-row','face-pull'],rounds:[{sets:[{ex:'barbell-row',steps:[{w:145,r:8,ratio:1}]},
+                                                         {ex:'face-pull',steps:[{w:50,r:15,ratio:1}]}]}]},
+      {lineup:['pull-up'],rounds:[]},
+    ]};
+  L.key=skey(L); return L;
+}
+function homeRoute(){ return cfg.shell==='A'?{name:'today'}:cfg.shell==='B'?{name:'day'}:{name:'timeline'}; }
+function resetPk(mode){ pk={search:'',cat:null,mode:mode||'pick'}; }
+function resetNs(){ ns={pick:null,agenda:null,open:false}; }
+function resetNav(){
+  stack=[homeRoute()]; if(cfg.land==='session' && liveS()) stack.push({name:'index'});
+  sheet=null; menuOpen=false; dayDate=TODAY;
+  cal={ym:TODAY.slice(0,7),sel:null}; hist={seg:'list'}; tl={n:14}; exd={tab:'history'};
+  resetPk('pick'); resetNs();
+  en={ssIdx:null,exId:null,w:0,r:0,half:false,steps:[],tab:'track'};
+  nx={name:'',cat:null,type:'weight',notes:'',brand:''};
+  taps=0; keystrokes=0; toastMsg='';
+}
+
+/* ============================ DOMAIN HELPERS ============================ */
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const N = id => esc(EX[id].name);
+const liveS = () => sessions.find(s=>s.live)||null;
+const pastAsc = () => sessions.filter(s=>!s.live).sort((a,b)=>a.key<b.key?-1:1);
+const pastDesc = () => pastAsc().reverse();
+const eachSet = (s,fn) => s.supersets.forEach(ss=>ss.rounds.forEach(rd=>rd.sets.forEach(fn)));
+const elapsedMin = L => Math.floor((Date.now()-L.startMs)/60000);
+const durMin = s => s.live ? elapsedMin(s) : s.endMin-s.startMin;
+const setCount = s => { let n=0; eachSet(s,()=>n++); return n; };
+const agendaText = s => s.agenda ? esc(s.agenda) : 'Session';
+const activeSplitObj = () => splits.find(s=>s.id===activeSplit)||null;
+function derivedIdx(){
+  const sp=activeSplitObj(); if(!sp) return null;
+  const last=pastAsc().filter(s=>s.splitId===sp.id && s.day!=null).pop();
+  return last ? (last.day+1)%sp.days.length : 0;
+}
+function volume(set){ return set.steps.reduce((a,s)=>a+s.w*s.r*s.ratio,0); }
+function valOf(set){ return EX[set.ex].type==='bodyweight' ? set.steps.reduce((a,s)=>a+s.r,0) : volume(set); }
+function priorBest(exId,sess){
+  let best=0;
+  sessions.forEach(s=>{ if(s===sess||!(s.key<sess.key)) return;
+    eachSet(s,st=>{ if(st.ex===exId){ const v=valOf(st); if(v>best) best=v; } }); });
+  return best;
+}
+function isPR(set,sess){
+  if(prCache.has(set)) return prCache.get(set);
+  const v=valOf(set); let best=priorBest(set.ex,sess);
+  eachSet(sess,st=>{ if(st!==set && st.ex===set.ex){ const x=valOf(st); if(x>best) best=x; } });
+  const r = v>0 && v>best; prCache.set(set,r); return r;
+}
+const prCount = s => { let n=0; eachSet(s,st=>{ if(isPR(st,s)) n++; }); return n; };
+function stepStr(exId,s){
+  const e=EX[exId];
+  const w = e.type==='bodyweight' ? (s.w===0?'BW':(s.w>0?'BW+'+s.w:'BW'+s.w)) : s.w+' lb';
+  return `${w} × ${s.r}`;
+}
+const setLabel = set => set.steps.map(s=>stepStr(set.ex,s)).join(' > ');
+function badgesFor(set,sess){
+  let h='';
+  if(set.steps.length>1) h+='<span class="pill drop">DROP</span>';
+  if(set.steps.some(s=>s.ratio<1)) h+='<span class="pill half">HALF</span>';
+  if(isPR(set,sess)) h+='<span class="pill pr">PR</span>';
+  return h;
+}
+function lastTop(exId){
+  for(const s of pastDesc()){
+    let found=null; eachSet(s,st=>{ if(st.ex===exId) found=st; });
+    if(found) return {w:found.steps[0].w, r:found.steps[0].r, date:s.date};
+  }
+  return null;
+}
+function prefillFor(exId){
+  const L=liveS();
+  if(L){
+    for(let i=L.supersets.length-1;i>=0;i--){
+      const ss=L.supersets[i];
+      for(let r=ss.rounds.length-1;r>=0;r--)
+        for(let k=ss.rounds[r].sets.length-1;k>=0;k--){
+          const st=ss.rounds[r].sets[k];
+          if(st.ex===exId) return {w:st.steps[0].w,r:st.steps[0].r,src:'this session'};
+        }
+    }
+  }
+  const h=lastTop(exId);
+  if(h) return {w:h.w,r:h.r,src:diffDays(TODAY,h.date)+'d ago'};
+  return {w: EX[exId].type==='bodyweight'?0:45, r:10, src:'never trained'};
+}
+function prevLine(exId){
+  const p=prefillFor(exId);
+  if(p.src==='never trained') return 'No previous — new exercise';
+  const e=EX[exId];
+  const wl = e.type==='bodyweight' ? (p.w===0?'bodyweight':(p.w>0?'BW+'+p.w:'BW'+p.w)) : p.w+' lb';
+  return `Previous: ${wl} × ${p.r} · ${p.src}`;
+}
+function nextTarget(ssIdx){
+  const ss=liveS().supersets[ssIdx];
+  const last=ss.rounds[ss.rounds.length-1];
+  if(!last || last.sets.length>=ss.lineup.length) return {round:ss.rounds.length,i:0,ex:ss.lineup[0]};
+  return {round:ss.rounds.length-1,i:last.sets.length,ex:ss.lineup[last.sets.length]};
+}
+function addSetSteps(ssIdx,exId,steps){
+  const ss=liveS().supersets[ssIdx];
+  let round=ss.rounds[ss.rounds.length-1];
+  if(!round || round.sets.length>=ss.lineup.length){ round={sets:[]}; ss.rounds.push(round); }
+  round.sets.push({ex:exId,steps});
+}
+function addDropStep(){
+  en.steps.push({w:en.w,r:en.r,ratio:en.half?0.5:1});
+  const e=EX[en.exId];
+  en.w = e.type==='bodyweight' ? en.w-INCR : Math.max(0,en.w-INCR*2);
+  en.r = Math.max(1,en.r-3); en.half=false;
+}
+function exHistory(exId){ // newest first: [{s, sets:[set...]}]
+  const out=[];
+  pastDesc().forEach(s=>{ const sets=[]; eachSet(s,st=>{ if(st.ex===exId) sets.push(st); }); if(sets.length) out.push({s,sets}); });
+  return out;
+}
+
+/* ============================ NAVIGATION ============================ */
+const topRoute = () => stack[stack.length-1];
+const push = r => stack.push(r);
+function cutToIndex(){ const i=stack.map(r=>r.name).lastIndexOf('index'); if(i>=0) stack.length=i+1; }
+function goPicker(){ resetPk('pick'); push({name:'picker'}); }
+function goNew(){ nx={name:'',cat:null,type:'weight',notes:'',brand:''}; push({name:'new'}); }
+function startEntry(ssIdx,exId){
+  en.ssIdx=ssIdx; en.exId=exId;
+  const p=prefillFor(exId);
+  en.w=p.w; en.r=p.r; en.half=false; en.steps=[]; en.tab='track';
+  cutToIndex(); push({name:'entry'});
+}
+function pickExercise(exId){
+  const L=liveS();
+  let ssIdx=L.supersets.findIndex(s=>s.lineup.includes(exId));
+  if(ssIdx<0){ ssIdx=L.supersets.length; L.supersets.push({lineup:[exId],rounds:[]}); }
+  startEntry(ssIdx,exId);
+}
+function createExercise(){
+  if(!nx.name.trim()||!nx.cat) return;
+  const slug=s=>(s.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,''))||'exercise';
+  let id=slug(nx.name), n=2; while(EX[id]){ id=slug(nx.name)+'-'+n; n++; }
+  const e={id,name:nx.name.trim(),cat:nx.cat,type:nx.type,unit:'lb',brand:nx.brand.trim(),notes:nx.notes.trim()};
+  EXS.push(e); EX[id]=e;
+  if(pk.mode==='pick' && liveS()) pickExercise(id);
+  else { stack.pop(); exd={tab:'history'}; push({name:'exdetail',exId:id}); }
+}
+function saveSet(){
+  const steps=[...en.steps,{w:en.w,r:en.r,ratio:en.half?0.5:1}];
+  addSetSteps(en.ssIdx,en.exId,steps);
+  lastSetAt=Date.now(); prCache.clear();
+  const t=nextTarget(en.ssIdx);
+  startEntry(en.ssIdx,t.ex);
+}
+function restLabel(){
+  if(lastSetAt==null) return '—';
+  const secs=Math.max(0,Math.floor((Date.now()-lastSetAt)/1000));
+  return `${Math.floor(secs/60)}:${pad2(secs%60)}`;
+}
+function computeStart(){
+  const sp=activeSplitObj();
+  if(!sp) return {agenda:ns.agenda!==null?ns.agenda:'',day:null,splitId:null,line:null};
+  const di=derivedIdx(), pick=ns.pick===null?di:ns.pick;
+  if(pick==='free') return {agenda:ns.agenda!==null?ns.agenda:'',day:null,splitId:null,line:'Free text'};
+  return {agenda:ns.agenda!==null?ns.agenda:sp.days[pick].agenda,day:pick,splitId:sp.id,line:sp.days[pick].agenda};
+}
+function startSession(){
+  const c=computeStart();
+  const L={id:'live',live:true,date:TODAY,startMin:NOW_MIN,startMs:Date.now(),agenda:c.agenda.trim(),
+    day:c.day,splitId:c.splitId,supersets:[]};
+  L.key=skey(L); sessions.push(L); lastSetAt=null; prCache.clear(); resetNs();
+  push({name:'index'});
+}
+function finishSession(){
+  const L=liveS(); if(!L) return;
+  if(!setCount(L)) sessions.splice(sessions.indexOf(L),1);
+  else { L.live=false; L.id='s'+(nextId++); L.endMin=L.startMin+elapsedMin(L); L.endedAtMs=Date.now(); }
+  prCache.clear(); resetNs(); stack=[homeRoute()]; dayDate=TODAY; sheet=null;
+}
+const canReopen = s => !s.live && s.endedAtMs && Date.now()-s.endedAtMs<3600000;
+function reopen(id){
+  const s=sessions.find(x=>x.id===id); if(!s||liveS()||!canReopen(s)) return;
+  s.live=true; s.id='live'; s.startMs=Date.now()-(s.endMin-s.startMin)*60000; delete s.endedAtMs;
+  prCache.clear(); push({name:'index'});
+}
+function toast(m){ toastMsg=m; setTimeout(()=>{ toastMsg=''; render(); },1800); }
+
+/* ============================ SHARED FRAGMENTS ============================ */
+const backBtn = (a) => `<button class="btn tiny" data-act="${a||'back'}">‹</button>`;
+const gearBtn = `<button class="ibtn" data-act="push" data-r="settings">⚙</button>`;
+const hdr = (title,left,right,sub) => `<div class="hdr"><div class="row">${left||''}
+  <div style="margin-left:${left?'6':'0'}px"><b>${title}</b>${sub?`<div class="tiny dim">${sub}</div>`:''}</div>
+  <div class="sp"></div>${right||''}</div></div>`;
+const scroll = (c,id) => `<div class="scroll"${id?` id="${id}"`:''}>${c}</div>`;
+const hdrBack = () => stack.length>1 ? backBtn() : '';
+
+function pkSearchBox(){
+  return `<div style="padding:12px 14px 6px"><input id="pkSearch" class="pk-search"
+    placeholder="Search all exercises…" value="${esc(pk.search)}" oninput="pkSearchInput(this)"></div>`;
+}
+function pkSearchInput(el){
+  pk.search=el.value; keystrokes++;
+  const pos=el.selectionStart; render();
+  const again=document.getElementById('pkSearch');
+  if(again){ again.focus(); try{ again.setSelectionRange(pos,pos); }catch(e){} }
+}
+function pkRow(e){
+  const h=lastTop(e.id);
+  const prevTxt = h ? (h.w===0?'BW':h.w+' lb')+' × '+h.r : '—';
+  return `<div class="pk-row" data-act="${pk.mode==='pick'?'pk-pick':'lib-open'}" data-ex="${e.id}">
+    <span>${esc(e.name)}</span>${e.type==='bodyweight'?'<span class="pill bw">BW</span>':''}
+    <div class="sp"></div><span class="tiny dim">${prevTxt}</span></div>`;
+}
+function ledger(s,o){
+  o=o||{};
+  const nm = id => o.link ? `<span class="exlink" data-act="sheet" data-ex="${id}">${N(id)}</span>` : N(id);
+  let body='';
+  s.supersets.forEach(ss=>{
+    let sets='';
+    ss.rounds.forEach((rd,ri)=>rd.sets.forEach(st=>{
+      sets+=`<div class="ix1-set"><span class="dim num" style="width:20px">${ri+1}</span>
+        ${ss.lineup.length>1?`<span class="dim" style="width:88px">${esc(EX[st.ex].name.split(' ')[0])}</span>`:''}
+        <span class="num">${setLabel(st)}</span>${badgesFor(st,s)}</div>`;
+    }));
+    if(!sets) sets='<div class="tiny dim" style="padding:3px 0">No sets yet</div>';
+    body+=`<div class="ix1-row"><div class="row"><b>${ss.lineup.map(nm).join('  +  ')}</b><div class="sp"></div>
+      ${ss.lineup.length>1?'<span class="pill" style="background:#243043;color:#8fb8e8">SUPERSET</span>':''}</div>
+      <div style="margin-top:5px">${sets}</div></div>`;
+  });
+  return body || '<div class="tiny dim" style="padding:12px 14px">No exercises saved in this session.</div>';
+}
+function sessionBlock(s,o){
+  o=o||{};
+  const times = s.live ? `${fmtTime(s.startMin)} – now · ${elapsedMin(s)} min`
+    : `${fmtTime(s.startMin)} – ${fmtTime(s.endMin)} · ${durMin(s)} min`;
+  const prs=prCount(s);
+  let act='';
+  if(s.live) act=`<button class="btn primary big" style="margin-top:10px;padding:12px" data-act="resume">Continue</button>`;
+  else if(canReopen(s)) act=`<button class="btn" style="margin-top:10px;width:100%" data-act="reopen" data-id="${s.id}" ${liveS()?'disabled':''}>Reopen</button>`;
+  return `<div style="border-bottom:1px solid var(--line)">
+    <div style="padding:12px 14px 4px">
+      <div class="row"><b style="font-size:16px">${agendaText(s)}</b>${s.live?'<span class="pill live">LIVE</span>':''}
+        <div class="sp"></div>${prs?`<span class="pill pr">${prs} PR</span>`:''}</div>
+      <div class="tiny dim">${dShort(s.date)} · ${times} · ${setCount(s)} sets</div>${act}
+    </div>${ledger(s,o)}</div>`;
+}
+function graph(exId){
+  const e=EX[exId], bw=e.type==='bodyweight', pts=[];
+  pastAsc().forEach(s=>{
+    let best=null,bv=-1; eachSet(s,st=>{ if(st.ex===exId){ const v=valOf(st); if(v>bv){bv=v;best=st;} } });
+    if(best) pts.push({date:s.date,y:bw?best.steps[0].r:best.steps[0].w});
+  });
+  if(pts.length<2) return '<div class="tiny dim" style="padding:12px 14px">Not enough sessions for a graph yet.</div>';
+  const W=320,H=120,pl=36,pr=10,pt=10,pb=22;
+  let lo=Math.min(...pts.map(p=>p.y)), hi=Math.max(...pts.map(p=>p.y)); if(lo===hi){lo-=5;hi+=5;}
+  const d0=D(pts[0].date).getTime(), d1=D(pts[pts.length-1].date).getTime();
+  const X=p=>pl+(D(p.date).getTime()-d0)/(d1-d0||1)*(W-pl-pr);
+  const Y=p=>pt+(1-(p.y-lo)/(hi-lo))*(H-pt-pb);
+  const line=pts.map(p=>X(p).toFixed(1)+','+Y(p).toFixed(1)).join(' ');
+  return `<div style="padding:8px 14px"><div class="tiny dim">Best set per session · ${bw?'reps':'top-step weight (lb)'}</div>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="120" style="display:block">
+      <line x1="${pl}" y1="${pt}" x2="${pl}" y2="${H-pb}" style="stroke:var(--line)"/>
+      <line x1="${pl}" y1="${H-pb}" x2="${W-pr}" y2="${H-pb}" style="stroke:var(--line)"/>
+      <polyline points="${line}" fill="none" style="stroke:var(--accent)" stroke-width="2"/>
+      ${pts.map(p=>`<circle cx="${X(p).toFixed(1)}" cy="${Y(p).toFixed(1)}" r="2.5" style="fill:var(--accent)"/>`).join('')}
+      <text x="${pl-4}" y="${pt+4}" text-anchor="end" font-size="10" style="fill:var(--dim)">${hi}</text>
+      <text x="${pl-4}" y="${H-pb}" text-anchor="end" font-size="10" style="fill:var(--dim)">${lo}</text>
+      <text x="${pl}" y="${H-6}" font-size="10" style="fill:var(--dim)">${fmtDate(pts[0].date,{month:'short',day:'numeric'})}</text>
+      <text x="${W-pr}" y="${H-6}" text-anchor="end" font-size="10" style="fill:var(--dim)">${fmtDate(pts[pts.length-1].date,{month:'short',day:'numeric'})}</text>
+    </svg></div>`;
+}
+function exHistoryRows(exId){
+  const h=exHistory(exId);
+  if(!h.length) return '<div class="tiny dim" style="padding:14px">No past sessions with this exercise yet.</div>';
+  return h.map(({s,sets})=>`<div class="ix1-row">
+    <div class="row"><b>${dShort(s.date)}</b><span class="tiny dim">${agendaText(s)}</span></div>
+    <div style="margin-top:4px">${sets.map((st,i)=>`<div class="ix1-set"><span class="dim num" style="width:20px">${i+1}</span>
+      <span class="num">${setLabel(st)}</span>${badgesFor(st,s)}</div>`).join('')}</div></div>`).join('');
+}
+function startBlock(){
+  const sp=activeSplitObj(), c=computeStart(), di=derivedIdx();
+  let line='', chooser='';
+  if(sp){
+    line=`<div class="tiny dim" style="margin-bottom:4px">${esc(sp.name)} · next day</div>
+      <button class="splitline" data-act="ns-toggle"><span>${esc(c.line)}</span><span class="sp"></span><span class="dim">${ns.open?'▴':'▾'}</span></button>`;
+    if(ns.open) chooser=`<div style="margin:6px 0 8px;border:1px solid var(--line);border-radius:10px;overflow:hidden">
+      ${sp.days.map((d,i)=>`<div class="pk-row" data-act="ns-pick" data-i="${i}"><span>${esc(d.agenda)}</span>
+        ${i===di?'<span class="pill act">NEXT</span>':''}</div>`).join('')}
+      <div class="pk-row" data-act="ns-pick" data-i="free"><span>Free text</span></div></div>`;
+  }
+  return `<div class="pcard">
+    <div class="tiny dim" style="letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Start session</div>
+    ${line}${chooser}
+    <div class="tiny dim" style="margin:10px 0 4px">AGENDA <span style="text-transform:none">(optional)</span></div>
+    <input id="nsAgenda" class="pk-search" value="${esc(c.agenda)}" placeholder="e.g. Back, Core" oninput="ns.agenda=this.value;keystrokes++;hud()">
+    <button class="btn primary big" style="margin-top:12px" data-act="start">Start</button></div>`;
+}
+function resumeCard(L){
+  return `<div class="pcard resume" data-act="resume">
+    <div class="tiny" style="letter-spacing:.1em;text-transform:uppercase;color:var(--accent)">Resume session</div>
+    <div style="font-size:26px;font-weight:800;margin:4px 0">${agendaText(L)}</div>
+    <div class="tiny dim">${elapsedMin(L)} min elapsed · ${setCount(L)} sets saved</div>
+    <div class="btn primary big" style="margin-top:12px">Resume →</div></div>`;
+}
+function pastRow(s){
+  const prs=prCount(s);
+  return `<div class="ix1-row" data-act="open-session" data-id="${s.id}">
+    <div class="row"><b>${dShort(s.date)}</b><span class="dim">${agendaText(s)}</span><div class="sp"></div>
+      ${prs?`<span class="pill pr">${prs} PR</span>`:''}<span class="dim">›</span></div>
+    <div class="tiny dim">${fmtTime(s.startMin)} · ${durMin(s)} min · ${setCount(s)} sets</div></div>`;
+}
+function signInPrompt(title,sub){
+  return `<div class="pcard" style="text-align:center;padding:24px 16px">
+    <div style="font-size:34px">☺</div>
+    <div style="font-size:18px;font-weight:800;margin:6px 0">${title}</div>
+    <div class="tiny dim" style="margin-bottom:14px">${sub}</div>
+    <button class="btn big" data-act="signin" style="margin-bottom:8px">Continue with Google</button>
+    <button class="btn big" data-act="signin">Continue with Apple</button></div>`;
+}
+function calGrid(act){
+  const [y,m]=cal.ym.split('-').map(Number);
+  const startDow=D(cal.ym+'-01').getUTCDay(), dim=new Date(Date.UTC(y,m,0)).getUTCDate();
+  const by={}; sessions.forEach(s=>{ by[s.date]=(by[s.date]||0)+1; });
+  let cells=''; for(let i=0;i<startDow;i++) cells+='<div></div>';
+  for(let d=1;d<=dim;d++){
+    const dt=cal.ym+'-'+pad2(d);
+    cells+=`<button class="cal-cell ${dt===TODAY?'today':''} ${dt===cal.sel||dt===(act==='cal-pick'?dayDate:'')?'sel':''}" data-act="${act}" data-date="${dt}">
+      <span>${d}</span><span class="dots">${'<i></i>'.repeat(by[dt]||0)}</span></button>`;
+  }
+  return `<div class="row" style="padding:10px 14px"><button class="btn tiny" data-act="cal-mon" data-d="-1">‹</button>
+    <b class="sp" style="text-align:center">${monthLabel(cal.ym)}</b>
+    <button class="btn tiny" data-act="cal-mon" data-d="1">›</button></div>
+    <div class="cal">${'SMTWTFS'.split('').map(c=>`<div class="cal-h">${c}</div>`).join('')}${cells}</div>`;
+}
+function srow(label,val,attrs,chev){
+  return `<div class="srow" ${attrs||''}><span>${label}</span><div class="sp"></div>
+    ${val?`<span class="dim tiny">${val}</span>`:''}${chev===false?'':'<span class="chev">›</span>'}</div>`;
+}
+
+/* ============================ HOT-PATH SCREENS (copied) ============================ */
+function vIndex(){ // IDX1
+  const L=liveS();
+  let body='';
+  L.supersets.forEach((ss,i)=>{
+    let sets='';
+    ss.rounds.forEach((rd,ri)=>rd.sets.forEach(st=>{
+      sets+=`<div class="ix1-set"><span class="dim num" style="width:20px">${ri+1}</span>
+        <span class="dim" style="width:88px">${esc(EX[st.ex].name.split(' ')[0])}</span>
+        <span class="num">${setLabel(st)}</span>${badgesFor(st,L)}</div>`;
+    }));
+    if(!sets) sets='<div class="tiny dim" style="padding:3px 0">No sets yet — tap to start</div>';
+    body+=`<div class="ix1-row" data-act="idx-open" data-ss="${i}">
+      <div class="row"><b>${ss.lineup.map(N).join('  +  ')}</b><div class="sp"></div>
+      ${ss.lineup.length>1?'<span class="pill" style="background:#243043;color:#8fb8e8">SUPERSET</span>':''}</div>
+      <div style="margin-top:5px">${sets}</div></div>`;
+  });
+  return `<div class="hdr"><div class="row">${backBtn()}<div style="margin-left:6px">
+    <b>Session</b> <span class="dim tiny">· ${agendaText(L)}</span>
+    <div class="tiny dim">started ${fmtTime(L.startMin)} · ${elapsedMin(L)} min elapsed</div></div>
+    <div class="sp"></div></div></div>
+    ${scroll(`${body}
+      <div style="padding:14px 14px 6px"><button class="btn big" data-act="idx-add">+ ADD EXERCISE</button></div>
+      <div style="padding:6px 14px 18px"><button class="btn big" style="font-size:15px;padding:12px" data-act="finish">Finish session</button></div>`)}`;
+}
+function vPicker(){ // PK1 — pick mode (session) or browse mode (library)
+  const pick=pk.mode==='pick';
+  let inner;
+  if(pk.search.trim()){
+    const q=pk.search.toLowerCase();
+    const res=EXS.filter(e=>e.name.toLowerCase().includes(q));
+    inner=`${pkSearchBox()}${res.map(pkRow).join('')||'<div class="tiny dim" style="padding:14px">No matches</div>'}`;
+  } else if(!pk.cat){
+    inner=`${pkSearchBox()}
+      <div class="pk1-catlist">${CATS.map(c=>`<div class="pk1-catrow" data-act="pk-cat" data-cat="${c}">
+        <div class="sp"><div style="font-weight:700">${c}</div>
+          <div class="tiny dim">${EXS.filter(e=>e.cat===c).length} exercises</div></div>
+        <span class="chev">›</span></div>`).join('')}</div>
+      <div style="padding:0 14px 14px"><button class="btn big" data-act="pk-new">+ NEW EXERCISE</button></div>`;
+  } else {
+    inner=`<div class="row" style="padding:10px 14px"><button class="btn tiny" data-act="pk-catback">‹ Categories</button>
+        <b style="margin-left:8px">${pk.cat}</b></div>
+      ${EXS.filter(e=>e.cat===pk.cat).map(pkRow).join('')}
+      <div style="padding:14px"><button class="btn big" data-act="pk-new">+ NEW EXERCISE</button></div>`;
+  }
+  const head = pick ? hdr('Choose exercise',backBtn('pk-back')) : hdr('Exercises',hdrBack());
+  return `${head}${scroll(inner)}`;
+}
+function vEntry(){ // EN1 (+ per-shell history affordances)
+  const e=EX[en.exId];
+  const tab = (en.tab==='graph'&&!cfg.graph) ? 'track' : en.tab;
+  const histBtn = cfg.shell==='C' ? `<button class="btn tiny" style="margin-left:auto" data-act="sheet" data-ex="${en.exId}">History</button>` : '';
+  const timer=`<div style="margin-left:${cfg.shell==='C'?'8':'auto'}px;text-align:right">
+    <div class="tiny dim" style="letter-spacing:.06em;text-transform:uppercase">Rest</div>
+    <div class="num" id="enRest" style="font-size:18px;font-weight:700">${restLabel()}</div></div>`;
+  const head=`<div class="hdr"><div class="row"><button class="btn tiny" data-act="en-back">‹</button>
+    <div style="margin-left:8px"><b>${esc(e.name)}</b><div class="tiny dim">${e.cat}${e.brand?' · '+esc(e.brand):''}</div></div>
+    ${histBtn}${timer}</div></div>`;
+  const tabs = cfg.shell==='B' ? `<div class="etabs">${['track','history'].concat(cfg.graph?['graph']:[]).map(t=>
+    `<button class="${tab===t?'on':''}" data-act="entab" data-t="${t}">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div>` : '';
+  let body;
+  if(tab==='history') body=scroll(exHistoryRows(en.exId));
+  else if(tab==='graph') body=scroll(graph(en.exId));
+  else {
+    const L=liveS(), ss=L.supersets[en.ssIdx]; let rows='';
+    ss.rounds.forEach((rd,ri)=>rd.sets.forEach(st=>{ if(st.ex!==en.exId) return;
+      rows+=`<div class="ix1-set"><span class="dim" style="width:20px">${ri+1}</span>
+        <span class="num">${setLabel(st)}</span>${badgesFor(st,L)}</div>`; }));
+    body=`<div class="scroll" style="padding:12px">
+      ${en.steps.length?`<div class="tiny dim" style="margin-bottom:8px">Building this set: ${en.steps.map(s=>stepStr(en.exId,s)).join(' > ')} > …</div>`:''}
+      <div class="a1-stepper"><button class="pm" data-act="en-w" data-d="-1">−</button>
+        <div><div class="v num">${en.w}</div><div class="tiny dim" style="text-align:center">${e.type==='bodyweight'?'lb added':'lb'}</div></div>
+        <button class="pm" data-act="en-w" data-d="1">+</button></div>
+      <div class="a1-stepper"><button class="pm" data-act="en-r" data-d="-1">−</button>
+        <div><div class="v num">${en.r}</div><div class="tiny dim" style="text-align:center">reps</div></div>
+        <button class="pm" data-act="en-r" data-d="1">+</button></div>
+      <div class="row" style="gap:8px;margin-bottom:10px">
+        <button class="btn" style="flex:1;${en.half?'background:#3a3146;color:#cbb3ff':''}" data-act="en-half">½ half reps</button>
+        <button class="btn" style="flex:1" data-act="en-drop">+ drop set</button></div>
+      <button class="btn primary big" data-act="en-save">SAVE SET</button>
+      <div class="tiny dim" style="margin:12px 0 2px">${prevLine(en.exId)}</div>
+      ${rows?`<div class="tiny dim" style="margin:10px 0 4px">THIS SESSION</div>${rows}`:''}
+    </div>`;
+  }
+  return head+tabs+body;
+}
+function vNew(){ // NX1
+  const chips=`<div class="nx-catrow">${CATS.map(c=>`<button class="nx-chip ${nx.cat===c?'on':''}" data-act="nx-cat" data-cat="${c}">${c}</button>`).join('')}</div>`;
+  const seg=`<div class="nx-seg">
+    <button class="${nx.type==='weight'?'on':''}" data-act="nx-type" data-t="weight">Weight &amp; reps</button>
+    <button class="${nx.type==='bodyweight'?'on':''}" data-act="nx-type" data-t="bodyweight">Bodyweight &amp; reps</button></div>`;
+  return `${hdr('New exercise',backBtn('back'))}
+    <div class="scroll" style="padding:14px">
+      <div class="tiny dim" style="margin-bottom:4px">NAME</div>
+      <input class="pk-search" value="${esc(nx.name)}" placeholder="e.g. Cable Crossover" oninput="nx.name=this.value">
+      <div class="tiny dim" style="margin:12px 0 4px">CATEGORY</div>${chips}
+      <div class="tiny dim" style="margin:12px 0 4px">MEASUREMENT TYPE</div>${seg}
+      <div class="tiny dim" style="margin:12px 0 4px">DEFAULT UNIT</div>
+      <div class="btn" style="width:100%;text-align:center;opacity:.6">lb (increment 5)</div>
+      <div class="tiny dim" style="margin:12px 0 4px">MACHINE BRAND <span style="text-transform:none">(optional)</span></div>
+      <input class="pk-search" value="${esc(nx.brand)}" placeholder="e.g. Technogym" oninput="nx.brand=this.value">
+      <div class="tiny dim" style="margin:12px 0 4px">NOTES</div>
+      <textarea class="nx-notes" placeholder="Setup notes, seat height, grip…" oninput="nx.notes=this.value">${esc(nx.notes)}</textarea>
+      <button class="btn primary big" style="margin-top:14px" data-act="nx-create">CREATE EXERCISE</button>
+    </div>`;
+}
+
+/* ============================ SHARED SHELL SCREENS ============================ */
+function vSess(r){
+  const s=sessions.find(x=>x.id===r.id); if(!s) return hdr('Session',backBtn())+scroll('');
+  return hdr(dShort(s.date),backBtn(),'',agendaText(s))+scroll(sessionBlock(s,{link:cfg.shell==='C'}));
+}
+function vExDetail(r){
+  const e=EX[r.exId];
+  const head=hdr(esc(e.name),backBtn(),'',e.cat+(e.brand?' · '+esc(e.brand):''));
+  if(cfg.shell==='B'){
+    const tab=(exd.tab==='graph'&&!cfg.graph)?'history':exd.tab;
+    return head+`<div class="etabs">${['history'].concat(cfg.graph?['graph']:[]).map(t=>
+      `<button class="${tab===t?'on':''}" data-act="extab" data-t="${t}">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div>`
+      +scroll(tab==='graph'?graph(r.exId):exHistoryRows(r.exId));
+  }
+  return head+scroll((cfg.graph?graph(r.exId)+'<div style="height:1px;background:var(--line)"></div>':'')+exHistoryRows(r.exId));
+}
+function vFriends(){
+  let body;
+  if(!cfg.signed) body=signInPrompt('Sign in to add friends','Friends, requests and your QR code need an account.');
+  else body=`
+    <div class="row" style="padding:12px 14px;gap:8px">
+      <button class="btn" style="flex:1" data-act="push" data-r="qr">My QR code</button>
+      <button class="btn" style="flex:1" data-act="push" data-r="addfriend">Add friend (scan)</button></div>
+    <div class="srow" data-act="push" data-r="requests"><span>Requests</span>
+      ${requests.length?`<span class="badge">${requests.length}</span>`:''}<div class="sp"></div><span class="chev">›</span></div>
+    <div class="sech">Friends (${friends.length})</div>
+    ${friends.map(f=>`<div class="srow"><div class="avatar">${esc(f.name[0])}</div>
+      <div><b>${esc(f.name)}</b><div class="tiny dim">${esc(f.info||'new friend')}</div></div></div>`).join('')}`;
+  return hdr('Friends',hdrBack(),'')+scroll(body);
+}
+function vRequests(){
+  const body = !cfg.signed ? signInPrompt('Sign in to add friends','Requests live in your account.')
+    : (requests.length ? requests.map((q,i)=>`<div class="srow"><div class="avatar">${esc(q.name[0])}</div>
+        <b>${esc(q.name)}</b><div class="sp"></div>
+        <button class="btn primary tiny" data-act="req-accept" data-n="${i}">Accept</button>
+        <button class="btn tiny" data-act="req-decline" data-n="${i}">Decline</button></div>`).join('')
+      : '<div class="tiny dim" style="padding:14px">No pending requests.</div>');
+  return hdr('Requests',backBtn())+scroll(body);
+}
+function vQR(){
+  let body;
+  if(!cfg.signed) body=signInPrompt('Sign in to add friends','Your QR code is tied to your account.');
+  else {
+    let h=7; for(const c of user.name) h=(h*31+c.charCodeAt(0))>>>0;
+    const rnd=mulberry(h), n=21, cs=9; let cells='';
+    const finder=(x,y)=>(x<7&&y<7)||(x>=n-7&&y<7)||(x<7&&y>=n-7);
+    for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+      let on;
+      if(finder(x,y)){ const ox=x<7?x:x-(n-7), oy=y<7?y:y-(n-7);
+        on = ox===0||ox===6||oy===0||oy===6||(ox>=2&&ox<=4&&oy>=2&&oy<=4); }
+      else on=rnd()<.5;
+      if(on) cells+=`<rect x="${x*cs}" y="${y*cs}" width="${cs}" height="${cs}"/>`;
+    }
+    body=`<div style="text-align:center;padding:24px 16px"><div style="display:inline-block;background:#fff;padding:14px;border-radius:14px">
+      <svg width="${n*cs}" height="${n*cs}" fill="#111">${cells}</svg></div>
+      <div style="font-weight:800;margin-top:12px">${esc(user.name)}</div>
+      <div class="tiny dim">A friend scans this to send you a request.</div></div>`;
+  }
+  return hdr('My QR code',backBtn())+scroll(body);
+}
+function vAddFriend(){
+  const body = !cfg.signed ? signInPrompt('Sign in to add friends','Scanning needs an account.')
+    : `<div style="margin:14px;height:260px;border:2px dashed #3a4048;border-radius:16px;display:flex;
+        align-items:center;justify-content:center;text-align:center" class="tiny dim">Camera viewfinder (stub)<br>Point at a friend's QR code</div>
+      <div style="padding:0 14px"><button class="btn big" data-act="scan-sim">Simulate scan</button></div>`;
+  return hdr('Add friend',backBtn())+scroll(body);
+}
+function vSettings(){
+  const sp=activeSplitObj();
+  const stub=(l,v,m)=>srow(l,v,`data-act="stub" data-m="${m||l+' — stub'}"`);
+  return hdr('Settings',backBtn())+scroll(`
+    <div class="sech">Training</div>
+    ${stub('Units','Pounds (lb) · increment 5 lb','Units are fixed to pounds in v1')}
+    ${srow('Splits',sp?esc(sp.name):'None active','data-act="push" data-r="splits"')}
+    ${cfg.shell==='C'?srow('Exercises','Library','data-act="push" data-r="lib"'):''}
+    ${stub('Export / Import','')}
+    <div class="sech">Purchases</div>
+    ${stub('Remove Ads','$4.99')}
+    ${stub('Restore Purchases','')}
+    <div class="sech">Account</div>
+    ${cfg.signed ? `<div class="srow"><span>Signed in as</span><div class="sp"></div><b class="tiny">${esc(user.name)}</b></div>
+      ${srow('Sign out','','data-act="signout"')}
+      ${srow('Delete account','','data-act="stub" data-m="Delete account runs on the server — stub"')}`
+      : srow('Sign in','Google / Apple','data-act="signin"')}
+    <div class="sech">About</div>
+    ${stub('Privacy Policy','')}
+    <div style="height:20px"></div>`);
+}
+function vSplits(){
+  let body;
+  if(!splits.length) body=`<div class="pcard" style="text-align:center">
+    <div style="font-size:18px;font-weight:800;margin-bottom:6px">Splits</div>
+    <div class="tiny dim" style="margin-bottom:14px">A split is a repeating plan of days, like Push / Pull / Legs. With one active, Start session offers the next day for you.</div>
+    <button class="btn primary big" data-act="split-create">Create a split</button></div>`;
+  else body=`<div class="tiny dim" style="padding:12px 14px 0">Tap a split to make it active. Tap the active one for none.</div>`+
+    splits.map(sp=>`<div class="pcard" data-act="split-active" data-id="${sp.id}" style="${sp.id===activeSplit?'border-color:var(--accent)':''}">
+      <div class="row"><b>${esc(sp.name)}</b><div class="sp"></div>${sp.id===activeSplit?'<span class="pill act">ACTIVE</span>':''}</div>
+      <div style="margin-top:6px">${sp.days.map(d=>`<div class="tiny dim" style="padding:2px 0">${esc(d.agenda)}</div>`).join('')}</div></div>`).join('');
+  return hdr('Splits',backBtn())+scroll(body);
+}
+
+/* ============================ SHELL A · TAB BAR ============================ */
+function lastSummary(){
+  const l=pastDesc()[0];
+  if(!l) return '<div class="tiny dim" style="padding:4px 14px 14px">No past sessions yet. Start one and it shows up here.</div>';
+  return `<div class="sech" style="padding-top:4px">Most recent session</div>${pastRow(l)}`;
+}
+function vToday(){
+  const L=liveS();
+  return hdr('Today',null,gearBtn,fmtDate(TODAY,{weekday:'long',month:'long',day:'numeric'}))+
+    scroll((L?resumeCard(L):startBlock())+lastSummary());
+}
+function vHistory(){
+  const seg=`<div class="seg"><button class="${hist.seg==='list'?'on':''}" data-act="hseg" data-s="list">List</button>
+    <button class="${hist.seg==='month'?'on':''}" data-act="hseg" data-s="month">Month</button></div>`;
+  let body;
+  const past=pastDesc();
+  if(hist.seg==='list'){
+    if(!past.length) body='<div class="tiny dim" style="padding:14px">No past sessions yet.</div>';
+    else { body=''; let m=''; past.forEach(s=>{ const ym=s.date.slice(0,7);
+      if(ym!==m){ m=ym; body+=`<div class="mh">${monthLabel(ym)}</div>`; } body+=pastRow(s); }); }
+  } else {
+    body=calGrid('hday');
+    if(cal.sel){ const day=sessions.filter(s=>s.date===cal.sel&&!s.live);
+      body+=`<div class="mh">${dShort(cal.sel)}</div>`+(day.length?day.map(pastRow).join(''):'<div class="tiny dim" style="padding:12px 14px">No sessions.</div>'); }
+  }
+  return hdr('History',hdrBack())+seg+scroll(body);
+}
+function tabbar(){
+  const tabs=[['today','⌂','Today'],['history','◷','History'],['lib','☰','Exercises'],['friends','☺','Friends']];
+  const cur=stack[0].name;
+  return `<div class="tabbar">${tabs.map(([k,ic,l])=>`<button class="${cur===k?'on':''}" data-act="tab" data-t="${k}">
+    <span class="ic">${ic}</span>${l}${k==='friends'&&cfg.signed&&requests.length?`<span class="badge">${requests.length}</span>`:''}</button>`).join('')}</div>`;
+}
+
+/* ============================ SHELL B · DAY PAGER ============================ */
+function vDay(){
+  const day=sessions.filter(s=>s.date===dayDate).sort((a,b)=>a.key<b.key?-1:1);
+  let body=day.map(s=>sessionBlock(s)).join('');
+  if(dayDate===TODAY && !liveS()) body+=startBlock();
+  if(!day.length && dayDate!==TODAY) body='<div style="padding:40px 14px;text-align:center" class="dim">Nothing saved on this day.</div>';
+  if(dayDate===TODAY && !day.length) body+='<div class="tiny dim" style="padding:0 14px 14px">No sessions yet. Start one above.</div>';
+  const head=`<div class="hdr"><div class="row">
+    <button class="ibtn" data-act="menu">☰</button><div class="sp"></div>
+    <button class="btn tiny" data-act="dday" data-d="-1">‹</button>
+    <b style="min-width:110px;text-align:center">${dShort(dayDate)}</b>
+    <button class="btn tiny" data-act="dday" data-d="1" ${dayDate>=TODAY?'disabled':''}>›</button>
+    <div class="sp"></div><button class="ibtn" data-act="dcal">▦</button></div></div>`;
+  return head+scroll(body);
+}
+function vCal(){
+  return hdr('Jump to date',backBtn())+scroll(calGrid('cal-pick')+
+    `<div class="tiny dim" style="padding:0 14px">Dotted days have sessions. A day can hold two.</div>`);
+}
+function menuHtml(){
+  const it=(l,r)=>`<div class="srow" data-act="menu-go" data-r="${r}"><span>${l}</span></div>`;
+  return `<div class="sheet-bg" data-act="menu"></div><div class="menu">
+    <div class="sech">Gym Notes</div>${it('Exercises','lib')}${it('Friends','friends')}${it('Splits','splits')}${it('Settings','settings')}</div>`;
+}
+
+/* ============================ SHELL C · TIMELINE ============================ */
+function tlCard(s){
+  const names=[]; s.supersets.forEach(ss=>ss.lineup.forEach(x=>{ if(!names.includes(x)) names.push(x); }));
+  const prs=prCount(s);
+  return `<div class="tlcard" data-act="open-session" data-id="${s.id}">
+    <div class="row"><b>${dShort(s.date)}</b><span class="dim">${agendaText(s)}</span><div class="sp"></div>
+      ${prs?`<span class="pill pr">${prs} PR</span>`:''}</div>
+    <div class="tiny dim">${durMin(s)} min · ${setCount(s)} sets</div>
+    <div class="tiny" style="margin-top:6px;color:#b9c2cf">${names.map(x=>`<span class="exlink" data-act="sheet" data-ex="${x}">${N(x)}</span>`).join(' · ')}</div></div>`;
+}
+function vTimeline(){
+  const L=liveS(), past=pastDesc();
+  const top1 = L ? `<div style="position:sticky;top:0;z-index:2;background:var(--bg);padding-top:1px">${resumeCard(L)}</div>` : startBlock();
+  const cards = past.slice(0,tl.n).map(tlCard).join('');
+  const more = tl.n<past.length ? '<div class="tiny dim" style="text-align:center;padding:10px">Loading older sessions…</div>' : (past.length?'<div class="tiny dim" style="text-align:center;padding:10px">That is everything.</div>':'');
+  const empty = past.length ? '' : '<div class="tiny dim" style="padding:0 14px 14px">No past sessions yet. Start one and it lands here.</div>';
+  const head=`<div class="hdr"><div class="row"><b style="font-size:17px">Gym Notes</b><div class="sp"></div>
+    <button class="ibtn" data-act="push" data-r="friends"><span class="avatar" style="width:34px;height:34px">☺</span>${cfg.signed&&requests.length?`<span class="badge">${requests.length}</span>`:''}</button>
+    ${gearBtn}</div></div>`;
+  return head+scroll(top1+(past.length?'<div class="sech" style="padding-top:2px">Past sessions</div>':'')+cards+more+empty,'tlScroll');
+}
+function sheetHtml(){
+  const e=EX[sheet.exId];
+  return `<div class="sheet-bg" data-act="sheet-close"></div><div class="sheet"><div class="grab"></div>
+    <div class="row" style="padding:4px 14px 8px"><div><b>${esc(e.name)}</b><div class="tiny dim">History · ${e.cat}</div></div>
+      <div class="sp"></div><button class="btn tiny" data-act="sheet-close">Close</button></div>
+    <div class="scroll" style="border-top:1px solid var(--line)">${cfg.graph?graph(sheet.exId):''}${exHistoryRows(sheet.exId)}</div></div>`;
+}
+
+/* ============================ ROUTER / RENDER ============================ */
+const FLOW = ['index','picker','entry','new'];
+function view(){
+  const r=topRoute();
+  switch(r.name){
+    case 'today': return vToday();
+    case 'history': return vHistory();
+    case 'day': return vDay();
+    case 'timeline': return vTimeline();
+    case 'index': return vIndex();
+    case 'picker': case 'lib': return vPicker();
+    case 'entry': return vEntry();
+    case 'new': return vNew();
+    case 'sess': return vSess(r);
+    case 'exdetail': return vExDetail(r);
+    case 'friends': return vFriends();
+    case 'requests': return vRequests();
+    case 'qr': return vQR();
+    case 'addfriend': return vAddFriend();
+    case 'settings': return vSettings();
+    case 'splits': return vSplits();
+    case 'cal': return vCal();
+  }
+  return '';
+}
+function routeKey(){
+  return cfg.shell+'|'+stack.map(r=>r.name+(r.id||r.exId||'')).join('/')+'|'+hist.seg+'|'+dayDate+'|'+(en.tab||'');
+}
+function render(){
+  cfg.live=!!liveS();
+  const screenEl=document.getElementById('screen');
+  const sc=screenEl.querySelector('.scroll'); if(sc) scrollMem[curKey]=sc.scrollTop;
+  let html=`<div style="flex:1;min-height:0;display:flex;flex-direction:column">${view()}</div>`;
+  if(cfg.shell==='A' && !FLOW.includes(topRoute().name)) html+=tabbar();
+  if(cfg.shell==='B' && menuOpen && topRoute().name==='day') html+=menuHtml();
+  if(cfg.shell==='C' && sheet) html+=sheetHtml();
+  if(toastMsg) html+=`<div class="toast">${esc(toastMsg)}</div>`;
+  curKey=routeKey();
+  screenEl.innerHTML=html;
+  const sc2=screenEl.querySelector('.scroll'); if(sc2 && scrollMem[curKey]) sc2.scrollTop=scrollMem[curKey];
+  hud(true);
+}
+
+/* ============================ ACTIONS ============================ */
+function act(a,el){
+  const d=+(el.dataset.d||0), ds=el.dataset;
+  switch(a){
+    case 'back': if(stack.length>1) stack.pop(); break;
+    case 'tab': stack=[{name:ds.t}]; if(ds.t==='lib') resetPk('browse'); break;
+    case 'push': if(ds.r==='lib') resetPk('browse'); push({name:ds.r}); break;
+    case 'resume': push({name:'index'}); break;
+    case 'start': startSession(); break;
+    case 'finish': finishSession(); break;
+    case 'reopen': reopen(ds.id); break;
+    case 'ns-toggle': ns.open=!ns.open; break;
+    case 'ns-pick': ns.pick = ds.i==='free'?'free':+ds.i; ns.agenda=null; ns.open=false; break;
+    case 'open-session': push({name:'sess',id:ds.id}); break;
+    case 'hseg': hist.seg=ds.s; cal.sel=null; break;
+    case 'cal-mon': { const [y,m]=cal.ym.split('-').map(Number); cal.ym=dstr(new Date(Date.UTC(y,m-1+d,1))).slice(0,7); break; }
+    case 'hday': { const day=sessions.filter(s=>s.date===ds.date&&!s.live);
+      if(day.length===1) push({name:'sess',id:day[0].id}); else cal.sel=ds.date; break; }
+    case 'dday': dayDate=addDays(dayDate,d); if(dayDate>TODAY) dayDate=TODAY; break;
+    case 'dcal': cal.ym=dayDate.slice(0,7); push({name:'cal'}); break;
+    case 'cal-pick': dayDate=ds.date; stack.pop(); break;
+    case 'menu': menuOpen=!menuOpen; break;
+    case 'menu-go': menuOpen=false; if(ds.r==='lib') resetPk('browse'); push({name:ds.r}); break;
+    case 'lib-open': if(cfg.shell==='C') sheet={exId:ds.ex}; else { exd={tab:'history'}; push({name:'exdetail',exId:ds.ex}); } break;
+    case 'extab': exd.tab=ds.t; break;
+    case 'entab': en.tab=ds.t; break;
+    case 'sheet': sheet={exId:ds.ex}; break;
+    case 'sheet-close': sheet=null; break;
+    case 'signin': cfg.signed=true; toast('Signed in as '+user.name); break;
+    case 'signout': cfg.signed=false; break;
+    case 'req-accept': { const q=requests.splice(+ds.n,1)[0]; if(q) friends.push({name:q.name,info:'new friend'}); break; }
+    case 'req-decline': requests.splice(+ds.n,1); break;
+    case 'scan-sim': friends.push({name:'Morgan',info:'new friend'}); stack.pop(); toast('Added Morgan'); break;
+    case 'stub': toast(ds.m); break;
+    case 'split-active': activeSplit = activeSplit===ds.id?null:ds.id; cfg.split=activeSplit==='ppl'?'ppl':'none'; resetNs(); break;
+    case 'split-create': splits.push(SPLITS_SEED()[0]); activeSplit='ppl'; cfg.split='ppl'; resetNs(); break;
+    /* ---- hot path ---- */
+    case 'idx-open': { const ssIdx=+ds.ss; startEntry(ssIdx, ds.ex||nextTarget(ssIdx).ex); break; }
+    case 'idx-add': goPicker(); break;
+    case 'pk-back': cutToIndex(); break;
+    case 'pk-cat': pk.cat=ds.cat; break;
+    case 'pk-catback': pk.cat=null; break;
+    case 'pk-pick': pickExercise(ds.ex); break;
+    case 'pk-new': goNew(); break;
+    case 'en-back': cutToIndex(); break;
+    case 'en-w': { const e=EX[en.exId]; en.w = e.type==='bodyweight' ? en.w+d*INCR : Math.max(0,en.w+d*INCR); break; }
+    case 'en-r': en.r=Math.max(1,en.r+d); break;
+    case 'en-half': en.half=!en.half; break;
+    case 'en-drop': addDropStep(); break;
+    case 'en-save': saveSet(); break;
+    case 'nx-cat': nx.cat=ds.cat; break;
+    case 'nx-type': nx.type=ds.t; break;
+    case 'nx-create': createExercise(); break;
+  }
+}
+
+/* ============================ HUD ============================ */
+const SHELLS = {
+  A:{name:'Tab bar', bet:'Four always-visible destinations (Today, History, Exercises, Friends). The resume card is one tap from cold open, and every history surface is one tab away with no hidden menu.',
+     tradeoff:'Per-exercise history is not reachable from the entry screen; it lives in the Exercises tab. The tab bar costs 56px on every non-session screen, and Splits and Settings are a level deeper.'},
+  B:{name:'Day pager', bet:'FitNotes muscle memory: the day is the unit, so cold open shows today, past dates are one arrow or a calendar jump away, and history sits inside the entry screen as Track | History | Graph tabs.',
+     tradeoff:'Everything but the day sits behind the menu. Reaching a session six weeks back means a calendar jump, there is no scrollable list of sessions, and Friends is buried.'},
+  C:{name:'Timeline', bet:'One scroll, no calendar: the live card on top and every past session as a card below. Exercise history is a bottom sheet from anywhere an exercise name appears.',
+     tradeoff:'Old sessions are only reachable by scrolling and there is no month view. Library and Splits are buried in Settings, and the sheet hides the screen you came from.'},
+};
+const TASK = '(Toggle "Opens on" = Session starts the phone on the session index when a session is live, so the path below is 2 taps.) Cold open → open the live session → open an exercise → SAVE SET (watch the counter). Then go back and find a session from about 6 weeks ago (Sep 12), look at an exercise\'s history, reach Friends signed out and signed in, change the active Split, and with Live off start a new session and check the split line offers the next day.';
+function hud(full){
+  document.getElementById('taps').textContent=taps+keystrokes;
+  document.getElementById('tapsbreak').textContent=`${taps} taps + ${keystrokes} keystrokes`;
+  if(!full) return;
+  document.getElementById('taskline').textContent=TASK;
+  const opt=(k,v,l)=>`<button class="${String(cfg[k])===String(v)?'on':''}" data-cfg="${k}" data-v="${v}">${l}</button>`;
+  document.getElementById('toggles').innerHTML=[
+    ['Shell',['shell','A','A'],['shell','B','B'],['shell','C','C']],
+    ['Live session',['live',true,'on'],['live',false,'off']],
+    ['Signed in',['signed',true,'on'],['signed',false,'off']],
+    ['Progress graph',['graph',true,'on'],['graph',false,'off']],
+    ['Data',['data','seed','3 months'],['data','empty','first run']],
+    ['Opens on',['land','home','Home'],['land','session','Session']],
+    ['Active split',['split','ppl','Push / Pull / Legs'],['split','none','none']],
+  ].map(([l,...o])=>`<div class="tg"><span class="l">${l}</span><div class="opts">${o.map(x=>opt(...x)).join('')}</div></div>`).join('');
+  document.getElementById('vlabel').textContent=`${cfg.shell} · ${SHELLS[cfg.shell].name}`;
+  document.getElementById('notes').innerHTML=Object.keys(SHELLS).map(k=>
+    `<li><b>${k} · ${SHELLS[k].name}${k===cfg.shell?' (current)':''}</b><br>bets: ${SHELLS[k].bet}<br><span class="dim">tradeoff: ${SHELLS[k].tradeoff}</span></li>`).join('');
+  document.getElementById('state').textContent=stateDump();
+}
+function stateDump(){
+  const L=liveS(), sp=activeSplitObj(), di=derivedIdx();
+  const lines=[
+    `shell: ${cfg.shell} · ${SHELLS[cfg.shell].name}`,
+    `route: ${stack.map(r=>r.name).join(' > ')}`,
+    `date (B): ${dayDate}   today: ${TODAY}`,
+    `past sessions: ${pastAsc().length}   exercises: ${EXS.length}`,
+    `signed in: ${cfg.signed}   graph: ${cfg.graph}`,
+    `land: ${cfg.land}`,
+    `active split: ${sp?sp.name:'none'}${sp&&di!=null?'   derived next: '+sp.days[di].agenda:''}`,
+    `friends: ${friends.map(f=>f.name).join(', ')||'-'}   requests: ${requests.map(f=>f.name).join(', ')||'-'}`,
+    ''];
+  if(!L) lines.push('live session: none');
+  else {
+    lines.push(`live session: "${L.agenda}" · ${elapsedMin(L)} min`);
+    L.supersets.forEach((ss,i)=>{
+      lines.push(`Superset ${i+1}  [${ss.lineup.map(x=>EX[x].name).join(' + ')}]`);
+      if(!ss.rounds.length) lines.push('  (no rounds yet)');
+      ss.rounds.forEach((rd,ri)=>{ lines.push(`  Round ${ri+1}`);
+        rd.sets.forEach(st=>{ lines.push(`    Set  ${EX[st.ex].name}${isPR(st,L)?'  ★PR':''}`);
+          st.steps.forEach((s,si)=>lines.push(`      Step ${si+1}  ${stepStr(st.ex,s)}  ratio ${s.ratio}`)); }); });
+    });
+    if(topRoute().name==='entry' && en.exId)
+      lines.push('', `composing: ${EX[en.exId].name} — ${stepStr(en.exId,{w:en.w,r:en.r,ratio:en.half?0.5:1})}${en.steps.length?' (plus '+en.steps.length+' drop step(s) pending)':''}`);
+  }
+  return lines.join('\n');
+}
+
+/* ============================ WIRING ============================ */
+document.querySelector('.phone').addEventListener('click',e=>{
+  const el=e.target.closest('[data-act]'); if(!el) return;
+  taps++; act(el.dataset.act,el); render();
+});
+document.getElementById('screen').addEventListener('scroll',e=>{
+  const t=e.target;
+  if(t.id==='tlScroll' && t.scrollTop+t.clientHeight>t.scrollHeight-80 && tl.n<pastAsc().length){ tl.n+=12; render(); }
+},true);
+document.addEventListener('click',e=>{
+  const n=e.target.closest('[data-nav]'); if(n){ setCfg('shell',['A','B','C'][(['A','B','C'].indexOf(cfg.shell)+ +n.dataset.nav+3)%3]); return; }
+  const c=e.target.closest('[data-cfg]');
+  if(c){ const v=c.dataset.v; setCfg(c.dataset.cfg, v==='true'?true:v==='false'?false:v); return; }
+  if(e.target.closest('[data-reset]')){ rebuildAll(); writeURL(); render(); }
+});
+document.addEventListener('keydown',e=>{
+  if(/INPUT|TEXTAREA/.test(e.target.tagName)||e.target.isContentEditable) return;
+  const k=['A','B','C'];
+  if(e.key==='ArrowLeft') setCfg('shell',k[(k.indexOf(cfg.shell)+2)%3]);
+  if(e.key==='ArrowRight') setCfg('shell',k[(k.indexOf(cfg.shell)+1)%3]);
+});
+function setCfg(k,v){
+  if(k==='shell'){ cfg.shell=v; resetNav(); }
+  else if(k==='signed'||k==='graph'){ cfg[k]=v; }
+  else if(k==='land'){ cfg.land=v; resetNav(); }
+  else if(k==='live'){
+    cfg.live=v; const L=liveS();
+    if(v&&!L){ sessions.push(mkLive()); lastSetAt=Date.now()-185000; }
+    if(!v&&L) sessions.splice(sessions.indexOf(L),1);
+    prCache.clear(); resetNav();
+  }
+  else if(k==='data'){ cfg.data=v; cfg.split=v==='seed'?'ppl':'none'; rebuildAll(); }
+  else if(k==='split'){
+    cfg[k]=v;
+    if(v==='ppl'){ if(!splits.find(s=>s.id==='ppl')) splits.unshift(SPLITS_SEED()[0]); activeSplit='ppl'; } else activeSplit=null;
+    resetNs();
+    if(stack.some(r=>FLOW.includes(r.name))) resetNav();
+  }
+  writeURL(); render();
+}
+function writeURL(){
+  const u=new URL(location);
+  u.searchParams.set('shell',cfg.shell); u.searchParams.set('live',cfg.live?1:0);
+  u.searchParams.set('signed',cfg.signed?1:0); u.searchParams.set('graph',cfg.graph?1:0);
+  u.searchParams.set('data',cfg.data); u.searchParams.set('split',cfg.split); u.searchParams.set('land',cfg.land);
+  try{ history.replaceState({},'',u); }catch(e){}
+}
+function readURL(){
+  const p=new URL(location).searchParams;
+  if(['A','B','C'].includes(p.get('shell'))) cfg.shell=p.get('shell');
+  if(p.get('live')!==null) cfg.live=p.get('live')==='1';
+  if(p.get('signed')!==null) cfg.signed=p.get('signed')==='1';
+  if(p.get('graph')!==null) cfg.graph=p.get('graph')==='1';
+  if(['seed','empty'].includes(p.get('data'))) cfg.data=p.get('data');
+  cfg.split = cfg.data==='empty' ? 'none' : 'ppl';
+  if(['home','session'].includes(p.get('land'))) cfg.land=p.get('land');
+  if(['ppl','none'].includes(p.get('split'))) cfg.split=p.get('split');
+}
+
+readURL();
+rebuildAll();
+writeURL();
+render();
+
+/* Rest timer ticks #enRest directly (no full render) so input focus is never disturbed. */
+setInterval(()=>{ const el=document.getElementById('enRest'); if(el) el.textContent=restLabel(); },1000);
+</script>
+</body>
+</html>
