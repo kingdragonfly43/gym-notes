@@ -241,6 +241,9 @@ The shape is **screen per exercise**, as in FitNotes. Inside a session:
 
    There is no target, no goal and no alarm. The logged-sets list has no "Today"
    header.
+
+   Across its top run **Track | History | Graph** tabs: Track is everything above,
+   and History and Graph are that exercise's history and progress line (§4.4).
 4. **New exercise form**: one full single-column form with every field visible. It
    is reached from the picker and drops the user straight into entry for the new
    exercise, without leaving the session.
